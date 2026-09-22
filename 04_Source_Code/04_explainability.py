@@ -1,99 +1,454 @@
 """
 04_explainability.py
-SHAP-based explainability for the XGBoost model: global feature importance
-and example local explanations for Low / Medium / High predictions.
+
+SHAP-based explainability for the XGBoost current-state classification
+benchmark.
+
+Important:
+The model explains reconstruction of the contemporaneous Efficiency_Status
+label. It is not a future-risk or causal explanation system.
 """
-import pandas as pd
-import numpy as np
-import joblib
+
+from __future__ import annotations
+
 import json
-import shap
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import sys
 import warnings
+from pathlib import Path
+
+import matplotlib
+import numpy as np
+import pandas as pd
+import shap
+from xgboost import XGBClassifier
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+
+
 warnings.filterwarnings("ignore")
 
-xgb = joblib.load("models/xgboost_model.joblib")
-with open("models/model_meta.json") as f:
-    meta = json.load(f)
-feature_cols = meta["feature_cols"]
-class_names = meta["class_names"]
 
-df = pd.read_parquet("data/manufacturing_features.parquet")
-df = df.sort_values("Datetime").reset_index(drop=True)
-df_enc = pd.get_dummies(df, columns=["Operation_Mode"], prefix="Mode")
+SOURCE_DIR = Path(__file__).resolve().parent
 
-# sample for SHAP speed
-sample = df_enc.sample(n=3000, random_state=42)
-X_sample = sample[feature_cols]
+if str(SOURCE_DIR) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIR))
 
-explainer = shap.TreeExplainer(xgb)
-shap_values = explainer.shap_values(X_sample)  # list-like per class or array (n, features, classes)
 
-# Handle shap output shape across versions
-sv = np.array(shap_values)
-if sv.ndim == 3 and sv.shape[0] == len(class_names):
-    # shape (classes, n, features)
-    shap_per_class = [sv[i] for i in range(len(class_names))]
-elif sv.ndim == 3 and sv.shape[-1] == len(class_names):
-    # shape (n, features, classes)
-    shap_per_class = [sv[:, :, i] for i in range(len(class_names))]
-else:
-    shap_per_class = [sv]
+from config import (
+    FEATURE_DATA_PATH,
+    FIGURES_DIR,
+    MODEL_DIR,
+    OUTPUT_DIR,
+    ensure_output_directories,
+)
 
-# ------------------------------------------------------------------
-# Global summary plot (mean |SHAP| across classes)
-# ------------------------------------------------------------------
-mean_abs_shap = np.mean([np.abs(s).mean(axis=0) for s in shap_per_class], axis=0)
-importance_series = pd.Series(mean_abs_shap, index=feature_cols).sort_values(ascending=False)
-importance_series.to_csv("outputs/shap_global_importance.csv")
 
-fig, ax = plt.subplots(figsize=(9, 6))
-importance_series.head(12)[::-1].plot(kind="barh", ax=ax, color="#8172b2")
-ax.set_title("Global SHAP Feature Importance (mean |SHAP value|, all classes)", fontsize=12, fontweight="bold")
-ax.set_xlabel("mean(|SHAP value|)")
-plt.tight_layout()
-plt.savefig("figures/11_shap_global_importance.png")
-plt.close()
+def normalize_shap_output(
+    shap_values,
+    class_count: int,
+) -> list[np.ndarray]:
+    """
+    Normalize SHAP multiclass output across SHAP/XGBoost versions.
 
-# ------------------------------------------------------------------
-# Per-class SHAP summary (beeswarm) for Low class (index depends on label order)
-# ------------------------------------------------------------------
-low_idx = class_names.index("Low")
-try:
-    fig = plt.figure(figsize=(9, 6))
-    shap.summary_plot(shap_per_class[low_idx], X_sample, feature_names=feature_cols, show=False, max_display=12)
-    plt.title("SHAP Summary — Drivers of 'Low' Efficiency Classification", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    plt.savefig("figures/12_shap_low_class_summary.png")
-    plt.close()
-except Exception as e:
-    print("Beeswarm plot skipped:", e)
+    Possible representations include:
+      (classes, rows, features)
+      (rows, features, classes)
+      (rows, features)
+    """
 
-# ------------------------------------------------------------------
-# Save a few example local explanations for the app / paper
-# ------------------------------------------------------------------
-examples = []
-for cls in class_names:
-    idx = sample[sample[[c for c in feature_cols if c.startswith("Mode_")][0]].notna()].index
-    # just grab a row whose true label matches this class
-    true_label_col = df.loc[sample.index, "Efficiency_Status"]
-    match = sample.index[true_label_col.loc[sample.index] == cls]
-    if len(match) > 0:
-        ridx = match[0]
-        pos = sample.index.get_loc(ridx)
-        cls_i = class_names.index(cls)
-        row_shap = shap_per_class[cls_i][pos]
-        top_feats = pd.Series(row_shap, index=feature_cols).abs().sort_values(ascending=False).head(5)
-        examples.append({
-            "true_class": cls,
-            "row_index": int(ridx),
-            "top_contributing_features": {f: float(row_shap[feature_cols.index(f)]) for f in top_feats.index}
-        })
+    if isinstance(shap_values, list):
+        return [
+            np.asarray(values)
+            for values in shap_values
+        ]
 
-with open("outputs/shap_example_explanations.json", "w") as f:
-    json.dump(examples, f, indent=2)
+    values = np.asarray(
+        shap_values
+    )
 
-print("Explainability analysis complete.")
-print(importance_series.head(10))
+    if (
+        values.ndim == 3
+        and values.shape[0] == class_count
+    ):
+        return [
+            values[index]
+            for index in range(
+                class_count
+            )
+        ]
+
+    if (
+        values.ndim == 3
+        and values.shape[-1] == class_count
+    ):
+        return [
+            values[:, :, index]
+            for index in range(
+                class_count
+            )
+        ]
+
+    if values.ndim == 2:
+        return [
+            values
+        ]
+
+    raise ValueError(
+        "Unsupported SHAP output shape: "
+        f"{values.shape}"
+    )
+
+
+def main() -> None:
+    ensure_output_directories()
+
+    # --------------------------------------------------------------
+    # Load model metadata
+    # --------------------------------------------------------------
+    metadata_path = (
+        MODEL_DIR
+        / "model_meta.json"
+    )
+
+    metadata = json.loads(
+        metadata_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    feature_columns = metadata[
+        "feature_columns"
+    ]
+
+    class_names = metadata[
+        "class_names"
+    ]
+
+    mode_columns = metadata[
+        "mode_columns"
+    ]
+
+    # --------------------------------------------------------------
+    # Load XGBoost using native serialization
+    # --------------------------------------------------------------
+    model = XGBClassifier()
+
+    model.load_model(
+        MODEL_DIR
+        / "xgboost_model.json"
+    )
+
+    # --------------------------------------------------------------
+    # Load and encode data
+    # --------------------------------------------------------------
+    df = pd.read_parquet(
+        FEATURE_DATA_PATH
+    )
+
+    df["Datetime"] = pd.to_datetime(
+        df["Datetime"]
+    )
+
+    df = (
+        df.sort_values("Datetime")
+        .reset_index(drop=True)
+    )
+
+    encoded = pd.get_dummies(
+        df,
+        columns=["Operation_Mode"],
+        prefix="Mode",
+        dtype=int,
+    )
+
+    for column in mode_columns:
+        if column not in encoded.columns:
+            encoded[column] = 0
+
+    # --------------------------------------------------------------
+    # Sample for SHAP runtime
+    # --------------------------------------------------------------
+    sample_size = min(
+        3000,
+        len(encoded),
+    )
+
+    sample = encoded.sample(
+        n=sample_size,
+        random_state=42,
+    )
+
+    X_sample = sample[
+        feature_columns
+    ]
+
+    # --------------------------------------------------------------
+    # Calculate SHAP values
+    # --------------------------------------------------------------
+    print(
+        "=" * 72
+    )
+
+    print(
+        "XGBOOST SHAP EXPLAINABILITY"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        f"Sample rows: {len(X_sample):,}"
+    )
+
+    explainer = shap.TreeExplainer(
+        model
+    )
+
+    raw_shap_values = (
+        explainer.shap_values(
+            X_sample
+        )
+    )
+
+    shap_per_class = (
+        normalize_shap_output(
+            raw_shap_values,
+            len(class_names),
+        )
+    )
+
+    # --------------------------------------------------------------
+    # Global mean absolute SHAP
+    # --------------------------------------------------------------
+    if len(shap_per_class) == 1:
+        mean_absolute_shap = (
+            np.abs(
+                shap_per_class[0]
+            )
+            .mean(axis=0)
+        )
+    else:
+        mean_absolute_shap = np.mean(
+            [
+                np.abs(values)
+                .mean(axis=0)
+                for values
+                in shap_per_class
+            ],
+            axis=0,
+        )
+
+    importance = pd.Series(
+        mean_absolute_shap,
+        index=feature_columns,
+        name="mean_abs_shap",
+    ).sort_values(
+        ascending=False
+    )
+
+    importance.to_csv(
+        OUTPUT_DIR
+        / "shap_global_importance.csv"
+    )
+
+    print(
+        "\nTop SHAP features:"
+    )
+
+    print(
+        importance
+        .head(10)
+        .to_string()
+    )
+
+    # --------------------------------------------------------------
+    # Global importance figure
+    # --------------------------------------------------------------
+    figure, axis = plt.subplots(
+        figsize=(9, 6)
+    )
+
+    (
+        importance
+        .head(12)
+        .sort_values()
+        .plot(
+            kind="barh",
+            ax=axis,
+        )
+    )
+
+    axis.set_title(
+        "Current-State Classification — "
+        "Global SHAP Importance"
+    )
+
+    axis.set_xlabel(
+        "mean(|SHAP value|)"
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "11_shap_global_importance.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Low-class SHAP summary
+    # --------------------------------------------------------------
+    low_index = class_names.index(
+        "Low"
+    )
+
+    if len(shap_per_class) > low_index:
+
+        try:
+            plt.figure(
+                figsize=(9, 6)
+            )
+
+            shap.summary_plot(
+                shap_per_class[
+                    low_index
+                ],
+                X_sample,
+                feature_names=feature_columns,
+                show=False,
+                max_display=12,
+            )
+
+            plt.title(
+                "SHAP Drivers of 'Low' "
+                "Current-State Classification"
+            )
+
+            plt.tight_layout()
+
+            plt.savefig(
+                FIGURES_DIR
+                / "12_shap_low_class_summary.png",
+                dpi=150,
+            )
+
+            plt.close()
+
+        except Exception as error:
+
+            print(
+                "\nLow-class SHAP summary "
+                "plot skipped:"
+            )
+
+            print(
+                type(error).__name__,
+                str(error),
+            )
+
+    # --------------------------------------------------------------
+    # Example local explanations
+    # --------------------------------------------------------------
+    examples = []
+
+    for class_name in class_names:
+
+        matches = sample[
+            sample["Efficiency_Status"]
+            == class_name
+        ]
+
+        if matches.empty:
+            continue
+
+        row_index = matches.index[0]
+
+        sample_position = (
+            sample.index.get_loc(
+                row_index
+            )
+        )
+
+        class_index = (
+            class_names.index(
+                class_name
+            )
+        )
+
+        if len(shap_per_class) == 1:
+            row_shap = (
+                shap_per_class[0][
+                    sample_position
+                ]
+            )
+        else:
+            row_shap = (
+                shap_per_class[
+                    class_index
+                ][
+                    sample_position
+                ]
+            )
+
+        contribution = pd.Series(
+            row_shap,
+            index=feature_columns,
+        )
+
+        top_features = (
+            contribution
+            .abs()
+            .sort_values(
+                ascending=False
+            )
+            .head(5)
+            .index
+        )
+
+        examples.append(
+            {
+                "true_class": class_name,
+                "row_index": int(
+                    row_index
+                ),
+                "interpretation": (
+                    "Current-state benchmark "
+                    "classification explanation"
+                ),
+                "top_contributing_features": {
+                    feature: float(
+                        contribution[
+                            feature
+                        ]
+                    )
+                    for feature
+                    in top_features
+                },
+            }
+        )
+
+    (
+        OUTPUT_DIR
+        / "shap_example_explanations.json"
+    ).write_text(
+        json.dumps(
+            examples,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    print(
+        "\nExplainability analysis complete."
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -2,34 +2,37 @@
   {
     "true_class": "High",
     "row_index": 16638,
+    "interpretation": "Current-state benchmark classification explanation",
     "top_contributing_features": {
-      "Error_to_Output_Ratio": 3.43428635597229,
-      "Production_Speed_units_per_hr": 2.2775719165802,
-      "Error_Rate_%": 2.0966367721557617,
-      "Packet_Loss_%": 0.19509302079677582,
-      "Quality_Adjusted_Error": 0.10178931802511215
+      "Production_Speed_units_per_hr": 2.77272367477417,
+      "Error_to_Output_Ratio": 2.6951966285705566,
+      "Error_Rate_%": 2.1589319705963135,
+      "Packet_Loss_%": 0.2002568542957306,
+      "Quality_Adjusted_Error": 0.13579681515693665
     }
   },
   {
     "true_class": "Low",
     "row_index": 75721,
+    "interpretation": "Current-state benchmark classification explanation",
     "top_contributing_features": {
-      "Error_Rate_%": 5.70613431930542,
-      "Error_to_Output_Ratio": 1.0937910079956055,
-      "Production_Speed_units_per_hr": -0.503122091293335,
-      "Quality_Adjusted_Error": 0.43701642751693726,
-      "Network_Latency_ms": 0.1629064530134201
+      "Error_Rate_%": 5.537665843963623,
+      "Error_to_Output_Ratio": 1.231424331665039,
+      "Production_Speed_units_per_hr": -0.5316656231880188,
+      "Quality_Adjusted_Error": 0.3412678837776184,
+      "Network_Latency_ms": 0.1393033117055893
     }
   },
   {
     "true_class": "Medium",
     "row_index": 84004,
+    "interpretation": "Current-state benchmark classification explanation",
     "top_contributing_features": {
-      "Error_Rate_%": 4.020264148712158,
-      "Error_to_Output_Ratio": 1.2556366920471191,
-      "Production_Speed_units_per_hr": -0.6406245827674866,
-      "Quality_Control_Defect_Rate_%": -0.27607661485671997,
-      "Energy_Efficiency_Ratio": 0.268538236618042
+      "Error_Rate_%": 4.373752117156982,
+      "Error_to_Output_Ratio": 0.9201068878173828,
+      "Production_Speed_units_per_hr": -0.7284716367721558,
+      "Quality_Control_Defect_Rate_%": -0.3033096492290497,
+      "Temperature_C": -0.2351519763469696
     }
   }
 ]
