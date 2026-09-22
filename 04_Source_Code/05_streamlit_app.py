@@ -479,7 +479,10 @@ with tab1:
             op_mode = st.selectbox("Operation Mode", options=mode_list)
 
         if st.button("Classify Current Efficiency", type="primary", width="stretch"):
-            row = {column: 0 for column in feature_cols}
+            # The feature row contains both numeric values and the categorical
+            # operation mode; keep the mapping value type broad enough for all
+            # of the assignments below.
+            row: dict[str, object] = {column: 0 for column in feature_cols}
             row.update(
                 {
                     "Temperature_C": temp,
@@ -798,18 +801,22 @@ with tab3:
     choice = st.selectbox("Select a record", options=sample_for_explain["label"])
     row = sample_for_explain[sample_for_explain["label"] == choice].iloc[0]
 
-    raw_row = pd.DataFrame([row.drop(labels=["label"], errors="ignore")])
+    raw_row = pd.DataFrame([row]).drop(columns=["label"], errors="ignore")
     encoded_row = encode_for_models(raw_row, mode_columns)
     xgb_label, xgb_probabilities = predict_row("XGBoost", encoded_row)
     rule_label, _ = predict_row("Transparent Business Rule", raw_row)
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Logged status", row["Efficiency_Status"])
+    m1.metric("Logged status", str(row["Efficiency_Status"]))
     m2.metric("Rule classification", rule_label)
     m3.metric("XGBoost benchmark", xgb_label)
     m4.metric(
         "Max XGBoost class probability",
-        f"{max(xgb_probabilities.values()) * 100:.1f}%",
+        (
+            f"{max(xgb_probabilities.values()) * 100:.1f}%"
+            if xgb_probabilities
+            else "N/A"
+        ),
     )
 
     explain_cols = [
@@ -831,11 +838,14 @@ with tab3:
     comparison["Dataset Average"] = comparison["Dataset Average"].round(2)
     st.dataframe(comparison, width="stretch", hide_index=True)
 
-    if row["Error_Rate_%"] > 5:
+    error_rate = float(str(row["Error_Rate_%"]))
+    production_speed = float(str(row["Production_Speed_units_per_hr"]))
+
+    if error_rate > 5:
         st.error("Rule condition triggered: Error Rate > 5%.")
-    elif row["Production_Speed_units_per_hr"] < 200:
+    elif production_speed < 200:
         st.error("Rule condition triggered: Production Speed < 200 units/hr.")
-    elif row["Error_Rate_%"] <= 2 and row["Production_Speed_units_per_hr"] >= 400:
+    elif error_rate <= 2 and production_speed >= 400:
         st.success("High-rule conditions are satisfied.")
     else:
         st.info("The record falls into the Medium rule region.")
