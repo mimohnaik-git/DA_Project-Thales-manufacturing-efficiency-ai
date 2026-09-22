@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -280,11 +281,11 @@ def evaluate_predictions(
     )
 
     high_recall = float(
-        class_metrics.loc["High", "recall"]
+        cast(float, class_metrics.loc["High", "recall"])
     )
 
     high_precision = float(
-        class_metrics.loc["High", "precision"]
+        cast(float, class_metrics.loc["High", "precision"])
     )
 
     return {
