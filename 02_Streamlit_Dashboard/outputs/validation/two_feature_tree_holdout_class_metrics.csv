@@ -1,0 +1,4 @@
+class,precision,recall,f1-score,support
+High,0.0,0.0,0.0,610.0
+Low,1.0,1.0,1.0,15599.0
+Medium,0.8613951374687571,1.0,0.925537109375,3791.0

@@ -1,0 +1,10 @@
+|--- Error_Rate_% <= 5.00
+|   |--- Production_Speed_units_per_hr <= 200.00
+|   |   |--- class: Low
+|   |--- Production_Speed_units_per_hr >  200.00
+|   |   |--- Production_Speed_units_per_hr <= 400.12
+|   |   |   |--- class: Medium
+|   |   |--- Production_Speed_units_per_hr >  400.12
+|   |   |   |--- class: Medium
+|--- Error_Rate_% >  5.00
+|   |--- class: Low
