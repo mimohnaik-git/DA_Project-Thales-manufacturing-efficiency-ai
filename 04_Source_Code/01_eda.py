@@ -1,139 +1,703 @@
 """
-01_eda.py -- Exploratory Data Analysis
-AI-Based Manufacturing Efficiency Classification (Thales Group)
+01_eda.py
+
+Exploratory Data Analysis for the Thales Manufacturing Efficiency project.
+
+Outputs:
+- Figures 01-07
+- EDA summary JSON
+- Rule-discovery contingency table
 """
-import pandas as pd
-import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+from __future__ import annotations
+
 import json
+import sys
 import warnings
+from pathlib import Path
+
+import matplotlib
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+
+
 warnings.filterwarnings("ignore")
 
-sns.set_theme(style="whitegrid", palette="deep")
-plt.rcParams["figure.dpi"] = 150
 
-DATA_PATH = "data/Thales_Group_Manufacturing.csv"
-FIG_DIR = "figures"
+SOURCE_DIR = Path(__file__).resolve().parent
 
-df = pd.read_csv(DATA_PATH)
-df["Datetime"] = pd.to_datetime(df["Date"] + " " + df["Timestamp"], format="%d-%m-%Y %H:%M:%S")
-df = df.sort_values("Datetime").reset_index(drop=True)
+if str(SOURCE_DIR) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIR))
 
-num_cols = ['Temperature_C','Vibration_Hz','Power_Consumption_kW','Network_Latency_ms',
-            'Packet_Loss_%','Quality_Control_Defect_Rate_%','Production_Speed_units_per_hr',
-            'Predictive_Maintenance_Score','Error_Rate_%']
 
-status_order = ["Low", "Medium", "High"]
-status_colors = {"Low": "#d62728", "Medium": "#ff9f1c", "High": "#2ca02c"}
+from config import (
+    FIGURES_DIR,
+    OUTPUT_DIR,
+    RAW_DATA_PATH,
+    ensure_output_directories,
+)
 
-summary = {}
-summary["n_rows"] = int(len(df))
-summary["n_machines"] = int(df["Machine_ID"].nunique())
-summary["date_range"] = [str(df["Datetime"].min()), str(df["Datetime"].max())]
-summary["class_counts"] = df["Efficiency_Status"].value_counts().to_dict()
-summary["class_pct"] = (df["Efficiency_Status"].value_counts(normalize=True) * 100).round(2).to_dict()
-summary["operation_mode_counts"] = df["Operation_Mode"].value_counts().to_dict()
-summary["missing_values"] = int(df.isna().sum().sum())
-summary["duplicate_rows"] = int(df.duplicated().sum())
 
-# ---------- 1. Class balance ----------
-fig, ax = plt.subplots(figsize=(6, 4.5))
-counts = df["Efficiency_Status"].value_counts().reindex(status_order)
-bars = ax.bar(counts.index, counts.values, color=[status_colors[s] for s in counts.index])
-for b in bars:
-    ax.text(b.get_x() + b.get_width()/2, b.get_height() + 500, f"{b.get_height():,}", ha="center", fontsize=10, fontweight="bold")
-ax.set_title("Class Distribution: Efficiency_Status", fontsize=13, fontweight="bold")
-ax.set_ylabel("Number of Records")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/01_class_distribution.png")
-plt.close()
+NUMERIC_COLUMNS = [
+    "Temperature_C",
+    "Vibration_Hz",
+    "Power_Consumption_kW",
+    "Network_Latency_ms",
+    "Packet_Loss_%",
+    "Quality_Control_Defect_Rate_%",
+    "Production_Speed_units_per_hr",
+    "Predictive_Maintenance_Score",
+    "Error_Rate_%",
+]
 
-# ---------- 2. Correlation heatmap ----------
-fig, ax = plt.subplots(figsize=(8, 6.5))
-corr = df[num_cols].corr()
-sns.heatmap(corr, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=ax,
-            cbar_kws={"label": "Pearson correlation"})
-ax.set_title("Correlation Matrix — Sensor, Production & Network Features", fontsize=12, fontweight="bold")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/02_correlation_heatmap.png")
-plt.close()
+STATUS_ORDER = [
+    "Low",
+    "Medium",
+    "High",
+]
 
-# ---------- 3. Feature distributions by efficiency status (key drivers) ----------
-key_feats = ["Error_Rate_%", "Production_Speed_units_per_hr"]
-fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-for ax, feat in zip(axes, key_feats):
-    for status in status_order:
-        sns.kdeplot(df.loc[df["Efficiency_Status"] == status, feat], ax=ax,
-                    label=status, color=status_colors[status], fill=True, alpha=0.25, linewidth=2)
-    ax.set_title(f"Distribution of {feat} by Efficiency Status", fontsize=11, fontweight="bold")
-    ax.legend(title="Efficiency")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/03_key_driver_distributions.png")
-plt.close()
+STATUS_COLORS = {
+    "Low": "#d62728",
+    "Medium": "#ff9f1c",
+    "High": "#2ca02c",
+}
 
-# ---------- 4. Non-driver sensor features by status (near-identical -> noise) ----------
-noise_feats = ["Temperature_C", "Vibration_Hz", "Network_Latency_ms", "Packet_Loss_%"]
-fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-for ax, feat in zip(axes.flat, noise_feats):
-    sns.boxplot(data=df, x="Efficiency_Status", y=feat, order=status_order, ax=ax,
-                palette=status_colors)
-    ax.set_title(feat, fontsize=10, fontweight="bold")
-plt.suptitle("Sensor/Network Features Show Little Separation Across Efficiency Classes", fontsize=12, fontweight="bold")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/04_noise_feature_boxplots.png")
-plt.close()
 
-# ---------- 5. Efficiency mix by Operation Mode ----------
-fig, ax = plt.subplots(figsize=(7, 4.8))
-ct = pd.crosstab(df["Operation_Mode"], df["Efficiency_Status"], normalize="index")[status_order] * 100
-ct.plot(kind="bar", stacked=True, ax=ax, color=[status_colors[s] for s in status_order])
-ax.set_ylabel("% of Records")
-ax.set_title("Efficiency Status Mix by Operation Mode", fontsize=12, fontweight="bold")
-ax.legend(title="Efficiency", bbox_to_anchor=(1.02, 1), loc="upper left")
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/05_efficiency_by_operation_mode.png")
-plt.close()
+def load_data() -> pd.DataFrame:
+    df = pd.read_csv(
+        RAW_DATA_PATH
+    )
 
-# ---------- 6. Machine-level efficiency profile (top/bottom machines) ----------
-machine_eff = df.groupby("Machine_ID")["Efficiency_Status"].apply(
-    lambda s: (s == "Low").mean() * 100).sort_values(ascending=False)
-summary["machine_low_pct_range"] = [float(machine_eff.min()), float(machine_eff.max())]
+    df["Datetime"] = pd.to_datetime(
+        df["Date"].astype(str)
+        + " "
+        + df["Timestamp"].astype(str),
+        format="%d-%m-%Y %H:%M:%S",
+        errors="raise",
+    )
 
-fig, ax = plt.subplots(figsize=(10, 5))
-machine_eff.plot(kind="bar", ax=ax, color="#4c72b0", width=0.8)
-ax.set_ylabel("% of records classified Low")
-ax.set_xlabel("Machine ID")
-ax.set_title("Share of 'Low' Efficiency Records by Machine", fontsize=12, fontweight="bold")
-ax.set_xticklabels(ax.get_xticklabels(), fontsize=6, rotation=90)
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/06_machine_low_share.png")
-plt.close()
+    return (
+        df.sort_values("Datetime")
+        .reset_index(drop=True)
+    )
 
-# ---------- 7. Daily trend of efficiency mix over the month ----------
-daily = df.groupby([df["Datetime"].dt.date, "Efficiency_Status"]).size().unstack(fill_value=0)
-daily_pct = daily.div(daily.sum(axis=1), axis=0) * 100
-fig, ax = plt.subplots(figsize=(11, 4.8))
-for status in status_order:
-    ax.plot(daily_pct.index, daily_pct[status], marker="o", markersize=3, label=status, color=status_colors[status])
-ax.set_ylabel("% of Records")
-ax.set_title("Daily Efficiency Mix Across January 2025", fontsize=12, fontweight="bold")
-ax.legend(title="Efficiency")
-fig.autofmt_xdate()
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/07_daily_efficiency_trend.png")
-plt.close()
 
-# ---------- Rule discovery: what actually separates the classes ----------
-err_bin = pd.cut(df["Error_Rate_%"], bins=[-1, 2, 5, 15], labels=["<=2%", "2-5%", ">5%"])
-speed_bin = pd.cut(df["Production_Speed_units_per_hr"], bins=[0, 200, 400, 500], labels=["<200", "200-400", "400-500"])
-rule_table = pd.crosstab([err_bin, speed_bin], df["Efficiency_Status"])
-rule_table.to_csv("outputs/rule_discovery_table.csv")
+def build_summary(
+    df: pd.DataFrame,
+) -> dict:
 
-with open("outputs/eda_summary.json", "w") as f:
-    json.dump(summary, f, indent=2, default=str)
+    machine_efficiency = (
+        df.groupby("Machine_ID")[
+            "Efficiency_Status"
+        ]
+        .apply(
+            lambda values: (
+                values == "Low"
+            ).mean()
+            * 100
+        )
+        .sort_values(
+            ascending=False
+        )
+    )
 
-print("EDA complete.")
-print(json.dumps(summary, indent=2, default=str))
+    return {
+        "n_rows": int(
+            len(df)
+        ),
+        "n_machines": int(
+            df["Machine_ID"].nunique()
+        ),
+        "date_range": [
+            str(
+                df["Datetime"].min()
+            ),
+            str(
+                df["Datetime"].max()
+            ),
+        ],
+        "class_counts": {
+            str(key): int(value)
+            for key, value
+            in (
+                df["Efficiency_Status"]
+                .value_counts()
+                .items()
+            )
+        },
+        "class_pct": {
+            str(key): float(value)
+            for key, value
+            in (
+                df["Efficiency_Status"]
+                .value_counts(
+                    normalize=True
+                )
+                .mul(100)
+                .round(2)
+                .items()
+            )
+        },
+        "operation_mode_counts": {
+            str(key): int(value)
+            for key, value
+            in (
+                df["Operation_Mode"]
+                .value_counts()
+                .items()
+            )
+        },
+        "missing_values": int(
+            df.isna()
+            .sum()
+            .sum()
+        ),
+        "duplicate_rows": int(
+            df.duplicated()
+            .sum()
+        ),
+        "machine_low_pct_range": [
+            float(
+                machine_efficiency.min()
+            ),
+            float(
+                machine_efficiency.max()
+            ),
+        ],
+    }
+
+
+def main() -> None:
+    ensure_output_directories()
+
+    sns.set_theme(
+        style="whitegrid",
+        palette="deep",
+    )
+
+    plt.rcParams[
+        "figure.dpi"
+    ] = 150
+
+    df = load_data()
+
+    summary = build_summary(
+        df
+    )
+
+    # --------------------------------------------------------------
+    # Figure 01 — Class distribution
+    # --------------------------------------------------------------
+    figure, axis = plt.subplots(
+        figsize=(6, 4.5)
+    )
+
+    counts = (
+        df["Efficiency_Status"]
+        .value_counts()
+        .reindex(
+            STATUS_ORDER
+        )
+    )
+
+    bars = axis.bar(
+        counts.index,
+        counts.to_numpy(dtype=float),
+        color=[
+            STATUS_COLORS[
+                status
+            ]
+            for status
+            in counts.index
+        ],
+    )
+
+    for bar in bars:
+        axis.text(
+            bar.get_x()
+            + bar.get_width() / 2,
+            bar.get_height() + 500,
+            f"{int(bar.get_height()):,}",
+            ha="center",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+    axis.set_title(
+        "Class Distribution: Efficiency_Status",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    axis.set_ylabel(
+        "Number of Records"
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "01_class_distribution.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 02 — Correlation matrix
+    # --------------------------------------------------------------
+    figure, axis = plt.subplots(
+        figsize=(8, 6.5)
+    )
+
+    correlation = df[
+        NUMERIC_COLUMNS
+    ].corr()
+
+    sns.heatmap(
+        correlation,
+        annot=True,
+        fmt=".2f",
+        cmap="RdBu_r",
+        center=0,
+        ax=axis,
+        cbar_kws={
+            "label": (
+                "Pearson correlation"
+            )
+        },
+    )
+
+    axis.set_title(
+        "Correlation Matrix — Sensor, Production & Network Features",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "02_correlation_heatmap.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 03 — Rule-linked distributions
+    # --------------------------------------------------------------
+    key_features = [
+        "Error_Rate_%",
+        "Production_Speed_units_per_hr",
+    ]
+
+    figure, axes = plt.subplots(
+        1,
+        2,
+        figsize=(12, 4.8),
+    )
+
+    for axis, feature in zip(
+        axes,
+        key_features,
+    ):
+
+        for status in STATUS_ORDER:
+
+            sns.kdeplot(
+                x=df.loc[
+                    df[
+                        "Efficiency_Status"
+                    ]
+                    == status,
+                    feature,
+                ],
+                ax=axis,
+                label=status,
+                color=STATUS_COLORS[
+                    status
+                ],
+                fill=True,
+                alpha=0.25,
+                linewidth=2,
+            )
+
+        axis.set_title(
+            f"Distribution of {feature} by Efficiency Status",
+            fontsize=11,
+            fontweight="bold",
+        )
+
+        axis.legend(
+            title="Efficiency"
+        )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "03_key_driver_distributions.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 04 — Sensor/network separation
+    # --------------------------------------------------------------
+    descriptive_features = [
+        "Temperature_C",
+        "Vibration_Hz",
+        "Network_Latency_ms",
+        "Packet_Loss_%",
+    ]
+
+    figure, axes = plt.subplots(
+        2,
+        2,
+        figsize=(11, 8),
+    )
+
+    for axis, feature in zip(
+        axes.flat,
+        descriptive_features,
+    ):
+
+        sns.boxplot(
+            data=df,
+            x="Efficiency_Status",
+            y=feature,
+            order=STATUS_ORDER,
+            ax=axis,
+            palette=STATUS_COLORS,
+        )
+
+        axis.set_title(
+            feature,
+            fontsize=10,
+            fontweight="bold",
+        )
+
+    figure.suptitle(
+        "Sensor/Network Features Show Little Separation Across Efficiency Classes",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "04_noise_feature_boxplots.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 05 — Operation mode
+    # --------------------------------------------------------------
+    figure, axis = plt.subplots(
+        figsize=(7, 4.8)
+    )
+
+    operation_mix = (
+        pd.crosstab(
+            df[
+                "Operation_Mode"
+            ],
+            df[
+                "Efficiency_Status"
+            ],
+            normalize="index",
+        )
+        .reindex(
+            columns=STATUS_ORDER,
+            fill_value=0,
+        )
+        * 100
+    )
+
+    operation_mix.plot(
+        kind="bar",
+        stacked=True,
+        ax=axis,
+        color=[
+            STATUS_COLORS[
+                status
+            ]
+            for status
+            in STATUS_ORDER
+        ],
+    )
+
+    axis.set_ylabel(
+        "% of Records"
+    )
+
+    axis.set_title(
+        "Efficiency Status Mix by Operation Mode",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    axis.legend(
+        title="Efficiency",
+        bbox_to_anchor=(
+            1.02,
+            1,
+        ),
+        loc="upper left",
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "05_efficiency_by_operation_mode.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 06 — Machine-level profile
+    # --------------------------------------------------------------
+    machine_efficiency = (
+        df.groupby("Machine_ID")[
+            "Efficiency_Status"
+        ]
+        .apply(
+            lambda values: (
+                values == "Low"
+            ).mean()
+            * 100
+        )
+        .sort_values(
+            ascending=False
+        )
+    )
+
+    figure, axis = plt.subplots(
+        figsize=(10, 5)
+    )
+
+    machine_efficiency.plot(
+        kind="bar",
+        ax=axis,
+        width=0.8,
+    )
+
+    axis.set_ylabel(
+        "% of records classified Low"
+    )
+
+    axis.set_xlabel(
+        "Machine ID"
+    )
+
+    axis.set_title(
+        "Share of 'Low' Efficiency Records by Machine",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    axis.set_xticklabels(
+        axis.get_xticklabels(),
+        fontsize=6,
+        rotation=90,
+    )
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "06_machine_low_share.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Figure 07 — Daily efficiency mix
+    # --------------------------------------------------------------
+    daily = (
+        df.groupby(
+            [
+                df[
+                    "Datetime"
+                ].dt.date,
+                "Efficiency_Status",
+            ]
+        )
+        .size()
+        .unstack(
+            fill_value=0
+        )
+        .reindex(
+            columns=STATUS_ORDER,
+            fill_value=0,
+        )
+    )
+
+    daily_percentage = (
+        daily.div(
+            daily.sum(
+                axis=1
+            ),
+            axis=0,
+        )
+        * 100
+    )
+
+    figure, axis = plt.subplots(
+        figsize=(11, 4.8)
+    )
+
+    for status in STATUS_ORDER:
+
+        axis.plot(
+            daily_percentage.index,
+            daily_percentage[
+                status
+            ],
+            marker="o",
+            markersize=3,
+            label=status,
+            color=STATUS_COLORS[
+                status
+            ],
+        )
+
+    axis.set_ylabel(
+        "% of Records"
+    )
+
+    axis.set_title(
+        "Daily Efficiency Mix Over Time",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    axis.legend(
+        title="Efficiency"
+    )
+
+    figure.autofmt_xdate()
+
+    figure.tight_layout()
+
+    figure.savefig(
+        FIGURES_DIR
+        / "07_daily_efficiency_trend.png",
+        dpi=150,
+    )
+
+    plt.close(
+        figure
+    )
+
+    # --------------------------------------------------------------
+    # Descriptive target-rule contingency table
+    # --------------------------------------------------------------
+    error_band = pd.cut(
+        df["Error_Rate_%"],
+        bins=[
+            -np.inf,
+            2,
+            5,
+            np.inf,
+        ],
+        labels=[
+            "<=2%",
+            "2-5%",
+            ">5%",
+        ],
+    )
+
+    speed_band = pd.cut(
+        df[
+            "Production_Speed_units_per_hr"
+        ],
+        bins=[
+            -np.inf,
+            200,
+            400,
+            np.inf,
+        ],
+        labels=[
+            "<200",
+            "200-400",
+            ">=400",
+        ],
+        right=False,
+    )
+
+    rule_table = pd.crosstab(
+        [
+            error_band,
+            speed_band,
+        ],
+        df[
+            "Efficiency_Status"
+        ],
+    )
+
+    rule_table.to_csv(
+        OUTPUT_DIR
+        / "rule_discovery_table.csv"
+    )
+
+    (
+        OUTPUT_DIR
+        / "eda_summary.json"
+    ).write_text(
+        json.dumps(
+            summary,
+            indent=2,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        "EDA COMPLETE"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        json.dumps(
+            summary,
+            indent=2,
+            default=str,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

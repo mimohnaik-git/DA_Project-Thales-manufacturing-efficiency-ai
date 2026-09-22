@@ -1,0 +1,47 @@
+{
+  "dataset_rows": 100000,
+  "chronological_split": {
+    "train_rows": 80000,
+    "test_rows": 20000,
+    "train_fraction": 0.8,
+    "test_fraction": 0.2
+  },
+  "rule_features": [
+    "Error_Rate_%",
+    "Production_Speed_units_per_hr"
+  ],
+  "majority_class": "Low",
+  "majority_baseline": {
+    "accuracy": 0.77995,
+    "balanced_accuracy": 0.3333333333333333,
+    "macro_f1": 0.2921243106079759,
+    "weighted_f1": 0.6835270681760723,
+    "macro_precision": 0.25998333333333334,
+    "macro_recall": 0.3333333333333333
+  },
+  "business_rule_full_dataset": {
+    "accuracy": 0.99998,
+    "balanced_accuracy": 0.9999914337723524,
+    "macro_f1": 0.999978346673072,
+    "weighted_f1": 0.9999800003926095,
+    "macro_precision": 0.9999652614941031,
+    "macro_recall": 0.9999914337723524
+  },
+  "business_rule_holdout": {
+    "accuracy": 1.0,
+    "balanced_accuracy": 1.0,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0
+  },
+  "two_feature_decision_tree_holdout": {
+    "accuracy": 0.9695,
+    "balanced_accuracy": 0.6666666666666666,
+    "macro_f1": 0.641845703125,
+    "weighted_f1": 0.9553855590820313,
+    "macro_precision": 0.6204650458229191,
+    "macro_recall": 0.6666666666666666
+  },
+  "business_rule_disagreements": 2
+}

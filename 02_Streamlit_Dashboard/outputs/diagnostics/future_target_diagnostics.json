@@ -1,0 +1,76 @@
+{
+  "dataset_rows": 100000,
+  "machines": 50,
+  "sampling_interval": {
+    "observations": 99922,
+    "median_minutes": 34.0,
+    "mean_minutes": 49.26674806348952,
+    "p25_minutes": 14.0,
+    "p75_minutes": 68.0,
+    "minimum_minutes": 1.0,
+    "maximum_minutes": 514.0
+  },
+  "candidate_horizons": [
+    {
+      "horizon_observations": 1,
+      "valid_rows": 99950,
+      "median_horizon_minutes": 34.0,
+      "mean_horizon_minutes": 49.25294647323662,
+      "status_persistence_rate": 0.6427413706853427,
+      "non_low_starting_rows": 22162,
+      "transitions_to_low": 17283,
+      "transition_to_low_rate": 0.7798483891345547,
+      "future_distribution": {
+        "Low": 77785,
+        "Medium": 19181,
+        "High": 2984
+      }
+    },
+    {
+      "horizon_observations": 3,
+      "valid_rows": 99850,
+      "median_horizon_minutes": 132.0,
+      "mean_horizon_minutes": 147.74436654982475,
+      "status_persistence_rate": 0.6427040560841262,
+      "non_low_starting_rows": 22144,
+      "transitions_to_low": 17270,
+      "transition_to_low_rate": 0.7798952312138728,
+      "future_distribution": {
+        "Low": 77712,
+        "Medium": 19158,
+        "High": 2980
+      }
+    },
+    {
+      "horizon_observations": 5,
+      "valid_rows": 99750,
+      "median_horizon_minutes": 231.0,
+      "mean_horizon_minutes": 246.23506766917293,
+      "status_persistence_rate": 0.6430576441102757,
+      "non_low_starting_rows": 22120,
+      "transitions_to_low": 17245,
+      "transition_to_low_rate": 0.7796112115732369,
+      "future_distribution": {
+        "Low": 77628,
+        "Medium": 19143,
+        "High": 2979
+      }
+    },
+    {
+      "horizon_observations": 10,
+      "valid_rows": 99500,
+      "median_horizon_minutes": 478.0,
+      "mean_horizon_minutes": 492.43977889447234,
+      "status_persistence_rate": 0.6438391959798995,
+      "non_low_starting_rows": 22061,
+      "transitions_to_low": 17130,
+      "transition_to_low_rate": 0.7764833869724854,
+      "future_distribution": {
+        "Low": 77429,
+        "Medium": 19099,
+        "High": 2972
+      }
+    }
+  ],
+  "recommended_target_definition": "Among observations where current Efficiency_Status is not Low, predict whether that machine transitions to Low at a future horizon."
+}

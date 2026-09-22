@@ -1,0 +1,61 @@
+{
+  "interpretation": "Temporal dependence should be considered meaningful only when observed agreement materially exceeds independent agreement, Cohen's kappa is above zero by a useful margin, and operational features exhibit non-trivial within-machine autocorrelation.",
+  "horizons": [
+    {
+      "horizon": 1,
+      "valid_rows": 99950,
+      "observed_same_status_rate": 0.6427413706853427,
+      "expected_same_status_if_independent": 0.6433913161683393,
+      "agreement_above_chance": -0.0006499454829966833,
+      "cohen_kappa": -0.0018225733485037754,
+      "mutual_information": 4.413394322935402e-06,
+      "future_low_rate_by_current_status": {
+        "High": 0.7758793969849246,
+        "Low": 0.7777806345451741,
+        "Medium": 0.7804661834489232
+      }
+    },
+    {
+      "horizon": 3,
+      "valid_rows": 99850,
+      "observed_same_status_rate": 0.6427040560841262,
+      "expected_same_status_if_independent": 0.6433968055739092,
+      "agreement_above_chance": -0.00069274948978304,
+      "cohen_kappa": -0.0019426339993893205,
+      "mutual_information": 3.169018331075635e-05,
+      "future_low_rate_by_current_status": {
+        "High": 0.7850435949027499,
+        "Low": 0.7778292538542713,
+        "Medium": 0.7790940402880702
+      }
+    },
+    {
+      "horizon": 5,
+      "valid_rows": 99750,
+      "observed_same_status_rate": 0.6430576441102757,
+      "expected_same_status_if_independent": 0.6433696680799745,
+      "agreement_above_chance": -0.00031202396969887136,
+      "cohen_kappa": -0.0008749226910083063,
+      "mutual_information": 1.547063128538948e-05,
+      "future_low_rate_by_current_status": {
+        "High": 0.7780389523169913,
+        "Low": 0.7778307355403838,
+        "Medium": 0.7798558144394525
+      }
+    },
+    {
+      "horizon": 10,
+      "valid_rows": 99500,
+      "observed_same_status_rate": 0.6438391959798995,
+      "expected_same_status_if_independent": 0.6433727244261509,
+      "agreement_above_chance": 0.00046647155374857086,
+      "cohen_kappa": 0.001308008628891355,
+      "mutual_information": 2.4261988687235628e-05,
+      "future_low_rate_by_current_status": {
+        "High": 0.7831365935919056,
+        "Low": 0.7786644972171645,
+        "Medium": 0.7754503560955174
+      }
+    }
+  ]
+}

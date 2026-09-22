@@ -1,5 +1,9 @@
 {
-  "feature_cols": [
+  "task": "Current-state Efficiency_Status classification benchmark",
+  "task_interpretation": "Rule reconstruction / automation; not validated future-risk prediction",
+  "future_prediction_supported": false,
+  "future_prediction_limitation": "Temporal diagnostics found approximately zero status dependence and near-zero within-machine feature autocorrelation.",
+  "feature_columns": [
     "Temperature_C",
     "Vibration_Hz",
     "Power_Consumption_kW",
@@ -38,21 +42,26 @@
     "Hour",
     "Is_Weekend"
   ],
-  "mode_cols": [
+  "mode_columns": [
     "Mode_Active",
     "Mode_Idle",
     "Mode_Maintenance"
-  ],
-  "categorical_features": [
-    "Operation_Mode"
   ],
   "class_names": [
     "High",
     "Low",
     "Medium"
   ],
-  "best_model": "Random Forest",
   "split_index": 80000,
   "train_size": 80000,
-  "test_size": 20000
+  "test_size": 20000,
+  "primary_metric": "macro_f1",
+  "primary_operational_method": "Transparent Business Rule",
+  "best_model": "Random Forest",
+  "benchmark_model": "Random Forest",
+  "rule_definition": {
+    "low": "Error_Rate_% > 5 OR Production_Speed_units_per_hr < 200",
+    "high": "Error_Rate_% <= 2 AND Production_Speed_units_per_hr >= 400",
+    "medium": "Otherwise"
+  }
 }

@@ -1,68 +1,114 @@
 """
-Streamlit Web Application — AI-Based Manufacturing Efficiency Classification
+Streamlit Web Application — Manufacturing Efficiency Classification & Validation
 Thales Group | Sensor, Production & 6G Network Data
 ================================================================
-Run with:  streamlit run app.py
+Run with: streamlit run app.py
+
+Methodological note
+-------------------
+Efficiency_Status is almost deterministically reconstructable from contemporaneous
+Error_Rate_% and Production_Speed_units_per_hr. The transparent business rule is
+therefore the primary current-state operational method. Machine-learning models are
+retained as benchmark models. Temporal diagnostics did not support a defensible
+future-risk prediction claim for this dataset.
 """
-import os
+
+from __future__ import annotations
+
 import json
+import os
+from pathlib import Path
+
 import joblib
 import numpy as np
 import pandas as pd
 
-# pandas >= 3.0 defaults to an arrow-backed "str" dtype for string columns and
-# even for Index objects built from plain Python string lists. PyArrow's
-# compute kernels backing that dtype are not safe to call repeatedly from
-# Streamlit's background script-runner thread and can segfault on rerun —
-# this must be set before any other pandas operation, and reverts pandas to
-# its classic numpy/object string storage everywhere in this process.
+# Keep classic object-backed string behavior for Streamlit/pandas stability.
 pd.set_option("future.infer_string", False)
 
-import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
+
 
 # ------------------------------------------------------------------
 # Page config
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="Thales | Manufacturing Efficiency AI",
+    page_title="Thales | Manufacturing Efficiency Analytics",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH = os.path.join(BASE_DIR, "data", "manufacturing_features.parquet")
-MODEL_DIR = os.path.join(BASE_DIR, "models")
-OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_PATH = BASE_DIR / "data" / "manufacturing_features.parquet"
+MODEL_DIR = BASE_DIR / "models"
+OUTPUTS_DIR = BASE_DIR / "outputs"
+METRICS_DIR = OUTPUTS_DIR / "metrics"
+DIAGNOSTICS_DIR = OUTPUTS_DIR / "diagnostics"
+VALIDATION_DIR = OUTPUTS_DIR / "validation"
 
-STATUS_COLORS = {"High": "#2ca02c", "Medium": "#ff9f1c", "Low": "#d62728"}
+STATUS_COLORS = {
+    "High": "#2ca02c",
+    "Medium": "#ff9f1c",
+    "Low": "#d62728",
+}
 STATUS_ORDER = ["Low", "Medium", "High"]
+
+FEATURE_GROUPS = {
+    "Network": [
+        "Network_Latency_ms",
+        "Packet_Loss_%",
+        "Network_Reliability_Score",
+    ],
+    "Sensor / Maintenance": [
+        "Temperature_C",
+        "Vibration_Hz",
+        "Sensor_Stability_Score",
+        "Predictive_Maintenance_Score",
+    ],
+    "Production / Quality": [
+        "Production_Speed_units_per_hr",
+        "Error_Rate_%",
+        "Quality_Control_Defect_Rate_%",
+        "Error_to_Output_Ratio",
+        "Quality_Adjusted_Error",
+        "Power_Consumption_kW",
+        "Energy_Efficiency_Ratio",
+    ],
+}
+
 
 # ------------------------------------------------------------------
 # Cached loaders
 # ------------------------------------------------------------------
 @st.cache_data
-def load_data():
+def load_data() -> pd.DataFrame:
     df = pd.read_parquet(DATA_PATH)
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df["Machine_ID"] = df["Machine_ID"].astype("int64")
-    for col in ["Operation_Mode", "Efficiency_Status"]:
-        df[col] = df[col].astype("object")
+    for column in ["Operation_Mode", "Efficiency_Status"]:
+        df[column] = df[column].astype("object")
     return df
+
 
 @st.cache_resource
 def load_models():
     from xgboost import XGBClassifier
+
     xgb_model = XGBClassifier()
-    xgb_model.load_model(os.path.join(MODEL_DIR, "xgboost_model.json"))
+    xgb_model.load_model(MODEL_DIR / "xgboost_model.json")
+
     models = {
         "XGBoost": xgb_model,
-        "Random Forest": joblib.load(os.path.join(MODEL_DIR, "random_forest_model.joblib")),
-        "Logistic Regression": joblib.load(os.path.join(MODEL_DIR, "logistic_regression_model.joblib")),
+        "Random Forest": joblib.load(MODEL_DIR / "random_forest_model.joblib"),
+        "Logistic Regression": joblib.load(
+            MODEL_DIR / "logistic_regression_model.joblib"
+        ),
     }
-    # Force single-threaded prediction — safer in constrained/sandboxed hosting environments
+
+    # Conservative inference settings for hosted environments.
     try:
         models["XGBoost"].set_params(n_jobs=1)
     except Exception:
@@ -71,80 +117,197 @@ def load_models():
         models["Random Forest"].n_jobs = 1
     except Exception:
         pass
-    scaler = joblib.load(os.path.join(MODEL_DIR, "scaler.joblib"))
-    le = joblib.load(os.path.join(MODEL_DIR, "label_encoder.joblib"))
-    with open(os.path.join(MODEL_DIR, "model_meta.json")) as f:
-        meta = json.load(f)
-    return models, scaler, le, meta
+
+    scaler = joblib.load(MODEL_DIR / "scaler.joblib")
+    label_encoder = joblib.load(MODEL_DIR / "label_encoder.joblib")
+
+    metadata = json.loads(
+        (MODEL_DIR / "model_meta.json").read_text(encoding="utf-8")
+    )
+
+    return models, scaler, label_encoder, metadata
+
+
+@st.cache_data
+def load_model_results() -> dict:
+    return json.loads(
+        (OUTPUTS_DIR / "model_results.json").read_text(encoding="utf-8")
+    )
+
 
 @st.cache_data
 def load_importance():
-    rf_imp = pd.read_csv(os.path.join(OUTPUTS_DIR, "rf_feature_importance.csv"), index_col=0).iloc[:, 0]
-    xgb_imp = pd.read_csv(os.path.join(OUTPUTS_DIR, "xgb_feature_importance.csv"), index_col=0).iloc[:, 0]
-    shap_imp = pd.read_csv(os.path.join(OUTPUTS_DIR, "shap_global_importance.csv"), index_col=0).iloc[:, 0]
-    return rf_imp, xgb_imp, shap_imp
+    def load_series(path: Path) -> pd.Series:
+        if not path.exists():
+            return pd.Series(dtype=float)
+        frame = pd.read_csv(path, index_col=0)
+        if frame.empty:
+            return pd.Series(dtype=float)
+        return frame.iloc[:, 0]
+
+    return (
+        load_series(OUTPUTS_DIR / "rf_feature_importance.csv"),
+        load_series(OUTPUTS_DIR / "xgb_feature_importance.csv"),
+        load_series(OUTPUTS_DIR / "shap_global_importance.csv"),
+    )
+
 
 @st.cache_data
-def load_model_results():
-    with open(os.path.join(OUTPUTS_DIR, "model_results.json")) as f:
-        return json.load(f)
+def load_optional_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
 
-df = load_data()
-try:
-    models, scaler, le, meta = load_models()
-except Exception as e:
-    st.error(
-        "**Could not load the trained models.**\n\n"
-        "This usually means the installed package versions don't match the ones "
-        "used to train the models. Please install the exact pinned versions:\n\n"
-        "```\npip install -r requirements.txt\n```\n\n"
-        f"Underlying error: `{type(e).__name__}: {e}`"
+
+@st.cache_data
+def load_optional_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ------------------------------------------------------------------
+# Core classification helpers
+# ------------------------------------------------------------------
+def business_rule_predict(frame: pd.DataFrame) -> np.ndarray:
+    """Transparent current-state efficiency rule discovered in diagnostics."""
+    error = frame["Error_Rate_%"].to_numpy()
+    speed = frame["Production_Speed_units_per_hr"].to_numpy()
+
+    predictions = np.full(len(frame), "Medium", dtype=object)
+
+    low_mask = (error > 5) | (speed < 200)
+    high_mask = (error <= 2) & (speed >= 400) & (~low_mask)
+
+    predictions[low_mask] = "Low"
+    predictions[high_mask] = "High"
+    return predictions
+
+
+def encode_for_models(frame: pd.DataFrame, mode_columns: list[str]) -> pd.DataFrame:
+    encoded = pd.get_dummies(
+        frame,
+        columns=["Operation_Mode"],
+        prefix="Mode",
+        dtype=int,
     )
-    st.stop()
-rf_imp, xgb_imp, shap_imp = load_importance()
-model_results = load_model_results()
-feature_cols = meta["feature_cols"]
-numeric_features = meta["numeric_features"]
-class_names = meta["class_names"]
+    for column in mode_columns:
+        if column not in encoded.columns:
+            encoded[column] = 0
+    return encoded
 
-FEATURE_GROUPS = {
-    "Network": ["Network_Latency_ms", "Packet_Loss_%", "Network_Reliability_Score"],
-    "Sensor": ["Temperature_C", "Vibration_Hz", "Sensor_Stability_Score", "Predictive_Maintenance_Score"],
-    "Production/Quality": ["Production_Speed_units_per_hr", "Error_Rate_%", "Quality_Control_Defect_Rate_%",
-                            "Error_to_Output_Ratio", "Quality_Adjusted_Error", "Power_Consumption_kW",
-                            "Energy_Efficiency_Ratio"],
-}
 
-def predict_row(model_name, row_df):
-    """row_df: single-row DataFrame with raw feature columns (pre-encoding done outside)."""
-    model = models[model_name]
+def predict_row(method_name: str, row_df: pd.DataFrame):
+    """Current-state classification. Returns (label, probabilities-or-None)."""
+    if method_name == "Transparent Business Rule":
+        return business_rule_predict(row_df)[0], None
+
+    model = models[method_name]
     X = row_df[feature_cols]
-    if model_name == "Logistic Regression":
+
+    if method_name == "Logistic Regression":
         X = X.copy()
         X[numeric_features] = scaler.transform(X[numeric_features])
-    proba = model.predict_proba(X)[0]
-    pred_idx = int(np.argmax(proba))
-    pred_label = le.inverse_transform([pred_idx])[0]
-    proba_dict = {le.inverse_transform([i])[0]: float(p) for i, p in enumerate(proba)}
-    return pred_label, proba_dict
 
-# ==================================================================
-# SIDEBAR — Global Filters & Live Predictor
-# ==================================================================
+    probabilities = model.predict_proba(X)[0]
+    pred_index = int(np.argmax(probabilities))
+    pred_label = le.inverse_transform([pred_index])[0]
+    probability_dict = {
+        le.inverse_transform([index])[0]: float(probability)
+        for index, probability in enumerate(probabilities)
+    }
+    return pred_label, probability_dict
+
+
+def batch_classify(method_name: str, batch: pd.DataFrame) -> pd.DataFrame:
+    result = batch.copy()
+
+    if method_name == "Transparent Business Rule":
+        result["Predicted"] = business_rule_predict(result)
+        result["Max_Class_Probability"] = np.nan
+        return result
+
+    encoded = encode_for_models(result, mode_columns)
+    X = encoded[feature_cols]
+
+    if method_name == "Logistic Regression":
+        X = X.copy()
+        X[numeric_features] = scaler.transform(X[numeric_features])
+
+    probabilities = models[method_name].predict_proba(X)
+    result["Predicted"] = le.inverse_transform(np.argmax(probabilities, axis=1))
+    result["Max_Class_Probability"] = probabilities.max(axis=1) * 100
+    return result
+
+
+# ------------------------------------------------------------------
+# Load artifacts
+# ------------------------------------------------------------------
+try:
+    df = load_data()
+    models, scaler, le, meta = load_models()
+    model_results = load_model_results()
+    rf_imp, xgb_imp, shap_imp = load_importance()
+except Exception as exc:
+    st.error(
+        "**Could not load the project artifacts.**\n\n"
+        "Run the rebuilt modeling/explainability pipeline first and make sure "
+        "the pinned dependencies are installed.\n\n"
+        f"Underlying error: `{type(exc).__name__}: {exc}`"
+    )
+    st.stop()
+
+# New rebuilt metadata contract.
+feature_cols = meta["feature_columns"]
+numeric_features = meta["numeric_features"]
+class_names = meta["class_names"]
+mode_columns = meta["mode_columns"]
+
+# New rebuilt result contract.
+ml_model_results = model_results.get("models", {})
+baseline_results = model_results.get("baselines", {})
+model_selection = model_results.get("selection", {})
+methodology = model_results.get("methodology", {})
+
+# Validation artifacts are optional so the app remains deployable even if a
+# user has not rerun every diagnostic locally yet.
+temporal_summary = load_optional_csv(METRICS_DIR / "temporal_model_summary.csv")
+holdout_results = load_optional_csv(METRICS_DIR / "holdout_model_results.csv")
+ablation_results = load_optional_csv(METRICS_DIR / "feature_ablation_results.csv")
+final_comparison = load_optional_csv(METRICS_DIR / "final_model_comparison.csv")
+target_diagnostics = load_optional_json(
+    DIAGNOSTICS_DIR / "target_diagnostics_summary.json"
+)
+temporal_diagnostics = load_optional_json(
+    DIAGNOSTICS_DIR / "temporal_signal_diagnostics.json"
+)
+
+
+# ------------------------------------------------------------------
+# Sidebar — filters and classification method
+# ------------------------------------------------------------------
 st.sidebar.markdown("## ⚙️ Thales Smart Factory")
-st.sidebar.caption("AI-Based Manufacturing Efficiency Classification")
+st.sidebar.caption("Manufacturing Efficiency Analytics")
 st.sidebar.markdown("---")
-
 st.sidebar.markdown("### 🔍 Filters")
 
 machine_list = sorted(df["Machine_ID"].unique().tolist())
-selected_machines = st.sidebar.multiselect("Machine selector", options=machine_list,
-                                            default=machine_list, help="Choose one or more machines")
+selected_machines = st.sidebar.multiselect(
+    "Machine selector",
+    options=machine_list,
+    default=machine_list,
+    help="Choose one or more machines.",
+)
 
 mode_list = sorted(df["Operation_Mode"].unique().tolist())
-selected_modes = st.sidebar.multiselect("Operation mode", options=mode_list, default=mode_list)
+selected_modes = st.sidebar.multiselect(
+    "Operation mode",
+    options=mode_list,
+    default=mode_list,
+)
 
-min_date, max_date = df["Datetime"].min(), df["Datetime"].max()
+min_date = df["Datetime"].min()
+max_date = df["Datetime"].max()
 date_range = st.sidebar.slider(
     "Time window filter",
     min_value=min_date.to_pydatetime(),
@@ -154,20 +317,39 @@ date_range = st.sidebar.slider(
 )
 
 network_range = st.sidebar.slider(
-    "Network quality filter (Reliability Score)",
-    min_value=0.0, max_value=100.0, value=(0.0, 100.0), step=1.0,
-    help="0 = worst network reliability, 100 = best"
+    "Network reliability score",
+    min_value=0.0,
+    max_value=100.0,
+    value=(0.0, 100.0),
+    step=1.0,
+    help="0 = worst network reliability, 100 = best.",
 )
 
-st.sidebar.markdown("### 🎚️ Metric Sensitivity (Alert Thresholds)")
-error_sensitivity = st.sidebar.slider("Error Rate alert threshold (%)", 0.0, 15.0, 5.0, 0.5)
-speed_sensitivity = st.sidebar.slider("Low production-speed alert threshold (units/hr)", 0.0, 500.0, 200.0, 10.0)
+st.sidebar.markdown("### 🎚️ Operational Thresholds")
+error_sensitivity = st.sidebar.slider(
+    "Error Rate threshold (%)", 0.0, 15.0, 5.0, 0.5
+)
+speed_sensitivity = st.sidebar.slider(
+    "Low production-speed threshold (units/hr)", 0.0, 500.0, 200.0, 10.0
+)
 
 st.sidebar.markdown("---")
-model_choice = st.sidebar.selectbox("Prediction model", options=list(models.keys()),
-                                     index=list(models.keys()).index("XGBoost"))
+decision_methods = [
+    "Transparent Business Rule",
+    "Random Forest",
+    "XGBoost",
+    "Logistic Regression",
+]
+method_choice = st.sidebar.selectbox(
+    "Current-state classification method",
+    options=decision_methods,
+    index=0,
+    help=(
+        "The transparent rule is the primary operational method. "
+        "ML models are retained as current-state benchmark models."
+    ),
+)
 
-# Apply filters
 if not selected_machines:
     selected_machines = machine_list
 if not selected_modes:
@@ -182,328 +364,795 @@ mask = (
     & (df["Network_Reliability_Score"] <= network_range[1])
 )
 fdf = df.loc[mask].copy()
-
 st.sidebar.markdown(f"**Filtered records:** {len(fdf):,} / {len(df):,}")
 
-# ==================================================================
-# HEADER
-# ==================================================================
-st.title("⚙️ AI-Based Manufacturing Efficiency Classification")
+
+# ------------------------------------------------------------------
+# Header
+# ------------------------------------------------------------------
+st.title("⚙️ Manufacturing Efficiency Classification & Validation")
 st.caption("Sensor, Production & 6G Network Data · Thales Group Smart Factory Initiative")
+
+st.info(
+    "**Methodology note:** this dashboard performs current-state efficiency "
+    "classification. Target diagnostics show that `Efficiency_Status` is almost "
+    "entirely defined by contemporaneous error rate and production speed. ML "
+    "models are therefore presented as benchmark models, not as validated "
+    "future-risk predictors."
+)
 
 if fdf.empty:
     st.warning("No records match the current filters. Please broaden your selection.")
     st.stop()
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📡 Efficiency Prediction",
-    "🏭 Machine-Level Insights",
-    "🔬 Explainability Panel",
-    "🌐 Operational Monitoring",
-])
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "📡 Current-State Classification",
+        "🏭 Machine Insights",
+        "🔬 Explainability",
+        "🌐 Operational Monitoring",
+        "✅ Model Validation",
+    ]
+)
+
 
 # ==================================================================
-# TAB 1 — Efficiency Prediction Dashboard
+# TAB 1 — Current-state classification
 # ==================================================================
 with tab1:
-    st.subheader("Real-Time Efficiency Classification")
+    st.subheader("Current-State Efficiency Classification")
 
-    kc1, kc2, kc3, kc4 = st.columns(4)
     class_counts = fdf["Efficiency_Status"].value_counts()
+    kc1, kc2, kc3, kc4 = st.columns(4)
     kc1.metric("Records in view", f"{len(fdf):,}")
-    kc2.metric("% High Efficiency", f"{class_counts.get('High', 0) / len(fdf) * 100:.1f}%")
-    kc3.metric("% Medium Efficiency", f"{class_counts.get('Medium', 0) / len(fdf) * 100:.1f}%")
-    kc4.metric("% Low Efficiency", f"{class_counts.get('Low', 0) / len(fdf) * 100:.1f}%",
-               delta=None, delta_color="inverse")
+    kc2.metric(
+        "% High",
+        f"{class_counts.get('High', 0) / len(fdf) * 100:.1f}%",
+    )
+    kc3.metric(
+        "% Medium",
+        f"{class_counts.get('Medium', 0) / len(fdf) * 100:.1f}%",
+    )
+    kc4.metric(
+        "% Low",
+        f"{class_counts.get('Low', 0) / len(fdf) * 100:.1f}%",
+    )
 
     st.markdown("---")
     left, right = st.columns([1.1, 1])
 
     with left:
-        st.markdown("#### 🎛️ Simulate a Live Machine Reading")
-        st.caption("Adjust sensor and production values to get an instant AI efficiency classification.")
+        st.markdown("#### 🎛️ Simulate a Machine Reading")
+        st.caption(
+            "Adjust contemporaneous machine values and classify the current efficiency state."
+        )
 
         c1, c2 = st.columns(2)
         with c1:
-            temp = st.slider("Temperature (°C)", 30.0, 90.0, float(fdf["Temperature_C"].mean()))
-            vib = st.slider("Vibration (Hz)", 0.0, 5.0, float(fdf["Vibration_Hz"].mean()))
-            power = st.slider("Power Consumption (kW)", 0.0, 10.0, float(fdf["Power_Consumption_kW"].mean()))
-            latency = st.slider("Network Latency (ms)", 0.0, 50.0, float(fdf["Network_Latency_ms"].mean()))
-            packet_loss = st.slider("Packet Loss (%)", 0.0, 5.0, float(fdf["Packet_Loss_%"].mean()))
+            temp = st.slider(
+                "Temperature (°C)", 30.0, 90.0, float(fdf["Temperature_C"].mean())
+            )
+            vib = st.slider(
+                "Vibration (Hz)", 0.0, 5.0, float(fdf["Vibration_Hz"].mean())
+            )
+            power = st.slider(
+                "Power Consumption (kW)",
+                0.0,
+                10.0,
+                float(fdf["Power_Consumption_kW"].mean()),
+            )
+            latency = st.slider(
+                "Network Latency (ms)",
+                0.0,
+                50.0,
+                float(fdf["Network_Latency_ms"].mean()),
+            )
+            packet_loss = st.slider(
+                "Packet Loss (%)",
+                0.0,
+                5.0,
+                float(fdf["Packet_Loss_%"].mean()),
+            )
         with c2:
-            defect = st.slider("QC Defect Rate (%)", 0.0, 10.0, float(fdf["Quality_Control_Defect_Rate_%"].mean()))
-            speed = st.slider("Production Speed (units/hr)", 0.0, 500.0, float(fdf["Production_Speed_units_per_hr"].mean()))
-            maint = st.slider("Predictive Maintenance Score", 0.0, 1.0, float(fdf["Predictive_Maintenance_Score"].mean()))
-            error = st.slider("Error Rate (%)", 0.0, 15.0, float(fdf["Error_Rate_%"].mean()))
+            defect = st.slider(
+                "QC Defect Rate (%)",
+                0.0,
+                10.0,
+                float(fdf["Quality_Control_Defect_Rate_%"].mean()),
+            )
+            speed = st.slider(
+                "Production Speed (units/hr)",
+                0.0,
+                500.0,
+                float(fdf["Production_Speed_units_per_hr"].mean()),
+            )
+            maint = st.slider(
+                "Predictive Maintenance Score",
+                0.0,
+                1.0,
+                float(fdf["Predictive_Maintenance_Score"].mean()),
+            )
+            error = st.slider(
+                "Error Rate (%)", 0.0, 15.0, float(fdf["Error_Rate_%"].mean())
+            )
             op_mode = st.selectbox("Operation Mode", options=mode_list)
 
-        if st.button("🔮 Classify Efficiency", type="primary", width='stretch'):
-            row = {c: 0 for c in feature_cols}
-            row.update({
-                "Temperature_C": temp, "Vibration_Hz": vib, "Power_Consumption_kW": power,
-                "Network_Latency_ms": latency, "Packet_Loss_%": packet_loss,
-                "Quality_Control_Defect_Rate_%": defect, "Production_Speed_units_per_hr": speed,
-                "Predictive_Maintenance_Score": maint, "Error_Rate_%": error,
-                "Hour": 12, "Is_Weekend": 0,
-            })
-            row["Sensor_Stability_Score"] = float(fdf["Sensor_Stability_Score"].mean())
+        if st.button("Classify Current Efficiency", type="primary", width="stretch"):
+            # The feature row contains both numeric values and the categorical
+            # operation mode; keep the mapping value type broad enough for all
+            # of the assignments below.
+            row: dict[str, object] = {column: 0 for column in feature_cols}
+            row.update(
+                {
+                    "Temperature_C": temp,
+                    "Vibration_Hz": vib,
+                    "Power_Consumption_kW": power,
+                    "Network_Latency_ms": latency,
+                    "Packet_Loss_%": packet_loss,
+                    "Quality_Control_Defect_Rate_%": defect,
+                    "Production_Speed_units_per_hr": speed,
+                    "Predictive_Maintenance_Score": maint,
+                    "Error_Rate_%": error,
+                    "Hour": 12,
+                    "Is_Weekend": 0,
+                    "Operation_Mode": op_mode,
+                }
+            )
+
+            row["Sensor_Stability_Score"] = float(
+                fdf["Sensor_Stability_Score"].mean()
+            )
             row["Energy_Efficiency_Ratio"] = speed / power if power > 0 else 0
-            row["Error_to_Output_Ratio"] = (error / speed * 1000) if speed > 0 else 0
+            row["Error_to_Output_Ratio"] = (
+                error / speed * 1000 if speed > 0 else 0
+            )
             row["Quality_Adjusted_Error"] = error + defect
-            lat_min, lat_max = df["Network_Latency_ms"].min(), df["Network_Latency_ms"].max()
-            loss_min, loss_max = df["Packet_Loss_%"].min(), df["Packet_Loss_%"].max()
+
+            lat_min = df["Network_Latency_ms"].min()
+            lat_max = df["Network_Latency_ms"].max()
+            loss_min = df["Packet_Loss_%"].min()
+            loss_max = df["Packet_Loss_%"].max()
             lat_norm = (latency - lat_min) / (lat_max - lat_min)
             loss_norm = (packet_loss - loss_min) / (loss_max - loss_min)
-            row["Network_Reliability_Score"] = (1 - (0.5 * lat_norm + 0.5 * loss_norm)) * 100
-            row[f"Mode_{op_mode}"] = 1
+            row["Network_Reliability_Score"] = (
+                1 - (0.5 * lat_norm + 0.5 * loss_norm)
+            ) * 100
 
             row_df = pd.DataFrame([row])
-            pred_label, proba_dict = predict_row(model_choice, row_df)
+            if method_choice != "Transparent Business Rule":
+                row_df = encode_for_models(row_df, mode_columns)
 
-            st.session_state["last_pred"] = (pred_label, proba_dict)
+            pred_label, proba_dict = predict_row(method_choice, row_df)
+            st.session_state["last_pred"] = (
+                method_choice,
+                pred_label,
+                proba_dict,
+                error,
+                speed,
+            )
 
         if "last_pred" in st.session_state:
-            pred_label, proba_dict = st.session_state["last_pred"]
+            used_method, pred_label, proba_dict, used_error, used_speed = st.session_state[
+                "last_pred"
+            ]
+
             st.markdown(
-                f"### Predicted Efficiency: "
-                f"<span style='color:{STATUS_COLORS[pred_label]}; font-size:1.5em;'>●</span> **{pred_label}**",
+                f"### Classified Efficiency: "
+                f"<span style='color:{STATUS_COLORS[pred_label]}; font-size:1.5em;'>●</span> "
+                f"**{pred_label}**",
                 unsafe_allow_html=True,
             )
-            conf_fig = go.Figure(go.Bar(
-                x=[proba_dict.get(s, 0) * 100 for s in STATUS_ORDER],
-                y=STATUS_ORDER, orientation="h",
-                marker_color=[STATUS_COLORS[s] for s in STATUS_ORDER],
-                text=[f"{proba_dict.get(s, 0) * 100:.1f}%" for s in STATUS_ORDER],
-                textposition="outside",
-            ))
-            conf_fig.update_layout(title="Prediction Confidence by Class", xaxis_title="Confidence (%)",
-                                    height=280, margin=dict(l=10, r=10, t=40, b=10), xaxis_range=[0, 110])
-            st.plotly_chart(conf_fig, width='stretch')
+            st.caption(f"Method: **{used_method}**")
+
+            if proba_dict is None:
+                st.caption(
+                    "The transparent rule is deterministic, so a probability/confidence score is not applicable."
+                )
+                if pred_label == "Low":
+                    st.warning(
+                        "Low status is triggered when Error Rate > 5% or Production Speed < 200 units/hr."
+                    )
+                elif pred_label == "High":
+                    st.success(
+                        "High status requires Error Rate ≤ 2% and Production Speed ≥ 400 units/hr."
+                    )
+                else:
+                    st.info(
+                        "Medium status applies when neither the Low nor High rule is satisfied."
+                    )
+            else:
+                probability_fig = go.Figure(
+                    go.Bar(
+                        x=[proba_dict.get(status, 0) * 100 for status in STATUS_ORDER],
+                        y=STATUS_ORDER,
+                        orientation="h",
+                        marker_color=[STATUS_COLORS[status] for status in STATUS_ORDER],
+                        text=[
+                            f"{proba_dict.get(status, 0) * 100:.1f}%"
+                            for status in STATUS_ORDER
+                        ],
+                        textposition="outside",
+                    )
+                )
+                probability_fig.update_layout(
+                    title="ML Class Probability Distribution",
+                    xaxis_title="Predicted probability (%)",
+                    height=280,
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    xaxis_range=[0, 110],
+                )
+                st.plotly_chart(probability_fig, width="stretch")
+                st.caption(
+                    "These are current-state benchmark-model probabilities, not probabilities of future degradation."
+                )
 
     with right:
-        st.markdown("#### Confidence Distribution — Filtered Batch")
-        st.caption(f"Model **{model_choice}** applied to a sample of the filtered dataset")
-
-        batch = fdf.sample(n=min(1500, len(fdf)), random_state=1).copy()
-        batch_enc = pd.get_dummies(batch, columns=["Operation_Mode"], prefix="Mode")
-        for c in meta["mode_cols"]:
-            if c not in batch_enc.columns:
-                batch_enc[c] = 0
-        Xb = batch_enc[feature_cols]
-        model = models[model_choice]
-        if model_choice == "Logistic Regression":
-            Xb = Xb.copy()
-            Xb[numeric_features] = scaler.transform(Xb[numeric_features])
-        proba_b = model.predict_proba(Xb)
-        pred_b = le.inverse_transform(np.argmax(proba_b, axis=1))
-        batch["Predicted"] = pred_b
-        batch["Confidence"] = proba_b.max(axis=1) * 100
-
-        fig = px.histogram(batch, x="Confidence", color="Predicted", nbins=25,
-                            color_discrete_map=STATUS_COLORS,
-                            title="Prediction Confidence Histogram")
-        fig.update_layout(height=280, margin=dict(l=10, r=10, t=40, b=10))
-        st.plotly_chart(fig, width='stretch')
-
-        agree = (batch["Predicted"] == batch["Efficiency_Status"]).mean() * 100
-        st.metric("Model agreement with logged status (sample)", f"{agree:.1f}%")
-
-        st.markdown("##### Recent Classifications")
-        show_cols = ["Datetime", "Machine_ID", "Operation_Mode", "Efficiency_Status", "Predicted", "Confidence"]
-        st.dataframe(
-            batch.sort_values("Datetime", ascending=False)[show_cols].head(15).style.format({"Confidence": "{:.1f}%"}),
-            width='stretch', height=320
+        st.markdown("#### Filtered-Batch Agreement")
+        st.caption(
+            f"Method **{method_choice}** applied to a sample of the filtered dataset."
         )
 
+        batch = fdf.sample(n=min(1500, len(fdf)), random_state=1).copy()
+        batch_scored = batch_classify(method_choice, batch)
+        agreement = (
+            batch_scored["Predicted"] == batch_scored["Efficiency_Status"]
+        ).mean() * 100
+        st.metric("Agreement with logged status", f"{agreement:.1f}%")
+
+        if method_choice != "Transparent Business Rule":
+            fig = px.histogram(
+                batch_scored,
+                x="Max_Class_Probability",
+                color="Predicted",
+                nbins=25,
+                color_discrete_map=STATUS_COLORS,
+                title="Maximum ML Class Probability",
+            )
+            fig.update_layout(height=280, margin=dict(l=10, r=10, t=40, b=10))
+            st.plotly_chart(fig, width="stretch")
+            st.caption(
+                "Probability concentration is shown for benchmark diagnostics only."
+            )
+        else:
+            rule_counts = (
+                batch_scored["Predicted"].value_counts().reindex(STATUS_ORDER, fill_value=0)
+            )
+            fig = px.bar(
+                x=rule_counts.index,
+                y=rule_counts.values,
+                color=rule_counts.index,
+                color_discrete_map=STATUS_COLORS,
+                title="Rule Classification Distribution",
+                labels={"x": "Efficiency Status", "y": "Records"},
+            )
+            st.plotly_chart(fig, width="stretch")
+
+        st.markdown("##### Recent Classifications")
+        show_cols = [
+            "Datetime",
+            "Machine_ID",
+            "Operation_Mode",
+            "Efficiency_Status",
+            "Predicted",
+        ]
+        if method_choice != "Transparent Business Rule":
+            show_cols.append("Max_Class_Probability")
+
+        display_batch = batch_scored.sort_values("Datetime", ascending=False)[show_cols].head(15)
+        if "Max_Class_Probability" in display_batch.columns:
+            st.dataframe(
+                display_batch.style.format({"Max_Class_Probability": "{:.1f}%"}),
+                width="stretch",
+                height=320,
+            )
+        else:
+            st.dataframe(display_batch, width="stretch", height=320)
+
+
 # ==================================================================
-# TAB 2 — Machine-Level Insights
+# TAB 2 — Machine-level descriptive analytics
 # ==================================================================
 with tab2:
-    st.subheader("Machine-Level Efficiency Trends")
+    st.subheader("Machine-Level Efficiency Patterns")
+    st.caption(
+        "These views are descriptive summaries of logged records; they are not forecasts."
+    )
 
-    machine_focus = st.multiselect("Focus machines (leave empty = all filtered machines)",
-                                    options=selected_machines, default=selected_machines[:5]
-                                    if len(selected_machines) > 5 else selected_machines)
+    default_focus = selected_machines[:5] if len(selected_machines) > 5 else selected_machines
+    machine_focus = st.multiselect(
+        "Focus machines (leave empty = all filtered machines)",
+        options=selected_machines,
+        default=default_focus,
+    )
     focus_df = fdf[fdf["Machine_ID"].isin(machine_focus)] if machine_focus else fdf
 
     col1, col2 = st.columns([1.3, 1])
     with col1:
-        st.markdown("##### Daily Efficiency Trend (per machine)")
-        trend = focus_df.groupby([focus_df["Datetime"].dt.date, "Machine_ID"])["Efficiency_Status"].apply(
-            lambda s: (s == "Low").mean() * 100).reset_index(name="Pct_Low")
+        trend = (
+            focus_df.groupby([focus_df["Datetime"].dt.date, "Machine_ID"])[
+                "Efficiency_Status"
+            ]
+            .apply(lambda series: (series == "Low").mean() * 100)
+            .reset_index(name="Pct_Low")
+        )
         trend.columns = ["Date", "Machine_ID", "Pct_Low"]
         trend["Machine_ID"] = trend["Machine_ID"].astype(str)
-        fig = px.line(trend, x="Date", y="Pct_Low", color="Machine_ID",
-                       title="% Low-Efficiency Records per Day, by Machine")
+        fig = px.line(
+            trend,
+            x="Date",
+            y="Pct_Low",
+            color="Machine_ID",
+            title="% Low-Efficiency Records per Day, by Machine",
+        )
         fig.update_layout(height=420)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width="stretch")
 
     with col2:
-        st.markdown("##### Machine Efficiency Ranking")
-        rank = fdf.groupby("Machine_ID")["Efficiency_Status"].apply(
-            lambda s: (s == "Low").mean() * 100).sort_values(ascending=False)
-        rank_df = rank.reset_index()
-        rank_df.columns = ["Machine_ID", "Pct_Low"]
-        rank_df["Machine_ID"] = rank_df["Machine_ID"].astype(str)
-        fig2 = px.bar(rank_df, x="Pct_Low", y="Machine_ID", orientation="h",
-                       title="Share of 'Low' Records by Machine", height=420,
-                       color="Pct_Low", color_continuous_scale="Reds")
-        fig2.update_layout(yaxis=dict(tickfont=dict(size=8)))
-        st.plotly_chart(fig2, width='stretch')
+        rank = (
+            fdf.groupby("Machine_ID")["Efficiency_Status"]
+            .apply(lambda series: (series == "Low").mean() * 100)
+            .sort_values(ascending=False)
+            .reset_index(name="Pct_Low")
+        )
+        rank["Machine_ID"] = rank["Machine_ID"].astype(str)
+        fig = px.bar(
+            rank,
+            x="Pct_Low",
+            y="Machine_ID",
+            orientation="h",
+            title="Share of Low Records by Machine",
+            height=420,
+            color="Pct_Low",
+            color_continuous_scale="Reds",
+        )
+        fig.update_layout(yaxis=dict(tickfont=dict(size=8)))
+        st.plotly_chart(fig, width="stretch")
 
-    st.markdown("##### Historical Classification Pattern (Machine × Efficiency Status)")
-    hist_pattern = pd.crosstab(fdf["Machine_ID"], fdf["Efficiency_Status"])
-    for s in STATUS_ORDER:
-        if s not in hist_pattern.columns:
-            hist_pattern[s] = 0
-    hist_pattern = hist_pattern[STATUS_ORDER]
-    hist_pattern_pct = hist_pattern.div(hist_pattern.sum(axis=1), axis=0) * 100
-    fig3 = px.imshow(hist_pattern_pct.T, aspect="auto", color_continuous_scale="RdYlGn_r",
-                      labels=dict(x="Machine ID", y="Efficiency Status", color="% of records"),
-                      title="Historical Efficiency Classification Heatmap")
-    st.plotly_chart(fig3, width='stretch')
+    st.markdown("##### Machine × Efficiency Status")
+    pattern = pd.crosstab(fdf["Machine_ID"], fdf["Efficiency_Status"])
+    for status in STATUS_ORDER:
+        if status not in pattern.columns:
+            pattern[status] = 0
+    pattern = pattern[STATUS_ORDER]
+    pattern_pct = pattern.div(pattern.sum(axis=1), axis=0) * 100
+    fig = px.imshow(
+        pattern_pct.T,
+        aspect="auto",
+        color_continuous_scale="RdYlGn_r",
+        labels=dict(x="Machine ID", y="Efficiency Status", color="% of records"),
+        title="Historical Efficiency Classification Heatmap",
+    )
+    st.plotly_chart(fig, width="stretch")
 
-    st.markdown("##### Machine Summary Table")
-    summary_tbl = fdf.groupby("Machine_ID").agg(
-        Records=("Efficiency_Status", "count"),
-        Pct_Low=("Efficiency_Status", lambda s: (s == "Low").mean() * 100),
-        Pct_Medium=("Efficiency_Status", lambda s: (s == "Medium").mean() * 100),
-        Pct_High=("Efficiency_Status", lambda s: (s == "High").mean() * 100),
-        Avg_Error_Rate=("Error_Rate_%", "mean"),
-        Avg_Production_Speed=("Production_Speed_units_per_hr", "mean"),
-        Avg_Maintenance_Score=("Predictive_Maintenance_Score", "mean"),
-    ).round(2).sort_values("Pct_Low", ascending=False)
-    st.dataframe(summary_tbl, width='stretch', height=350)
+    summary_tbl = (
+        fdf.groupby("Machine_ID")
+        .agg(
+            Records=("Efficiency_Status", "count"),
+            Pct_Low=("Efficiency_Status", lambda series: (series == "Low").mean() * 100),
+            Pct_Medium=(
+                "Efficiency_Status", lambda series: (series == "Medium").mean() * 100
+            ),
+            Pct_High=("Efficiency_Status", lambda series: (series == "High").mean() * 100),
+            Avg_Error_Rate=("Error_Rate_%", "mean"),
+            Avg_Production_Speed=("Production_Speed_units_per_hr", "mean"),
+            Avg_Maintenance_Score=("Predictive_Maintenance_Score", "mean"),
+        )
+        .round(2)
+        .sort_values("Pct_Low", ascending=False)
+    )
+    st.markdown("##### Machine Summary")
+    st.dataframe(summary_tbl, width="stretch", height=350)
+
 
 # ==================================================================
-# TAB 3 — Explainability Panel
+# TAB 3 — Explainability
 # ==================================================================
 with tab3:
-    st.subheader("Model Explainability")
+    st.subheader("ML Benchmark Explainability")
+    st.warning(
+        "Feature importance and SHAP explain how the ML benchmark reconstructs the current label. "
+        "They should not be interpreted as causal drivers or future-risk evidence."
+    )
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("##### Global Feature Importance (SHAP, mean |value|)")
-        shap_top = shap_imp.sort_values(ascending=False).head(12)
-        fig = px.bar(shap_top[::-1], orientation="h", title="Top Drivers of Efficiency Classification",
-                     labels={"value": "mean |SHAP value|", "index": "Feature"})
-        fig.update_layout(showlegend=False, height=430)
-        st.plotly_chart(fig, width='stretch')
+        if shap_imp.empty:
+            st.info("Run `04_explainability.py` to generate SHAP artifacts.")
+        else:
+            shap_top = shap_imp.sort_values(ascending=False).head(12)
+            fig = px.bar(
+                shap_top[::-1],
+                orientation="h",
+                title="Global SHAP Importance",
+                labels={"value": "mean |SHAP value|", "index": "Feature"},
+            )
+            fig.update_layout(showlegend=False, height=430)
+            st.plotly_chart(fig, width="stretch")
 
     with c2:
-        st.markdown("##### Model Comparison — Feature Importance")
-        model_imp_choice = st.radio("Importance source", ["Random Forest", "XGBoost"], horizontal=True)
+        model_imp_choice = st.radio(
+            "Importance source", ["Random Forest", "XGBoost"], horizontal=True
+        )
         imp_series = rf_imp if model_imp_choice == "Random Forest" else xgb_imp
-        top = imp_series.sort_values(ascending=False).head(12)
-        fig2 = px.bar(top[::-1], orientation="h", title=f"{model_imp_choice} Feature Importance",
-                      labels={"value": "Importance", "index": "Feature"})
-        fig2.update_layout(showlegend=False, height=430)
-        st.plotly_chart(fig2, width='stretch')
+        if imp_series.empty:
+            st.info("Feature-importance artifact is not available.")
+        else:
+            top = imp_series.sort_values(ascending=False).head(12)
+            fig = px.bar(
+                top[::-1],
+                orientation="h",
+                title=f"{model_imp_choice} Feature Importance",
+                labels={"value": "Importance", "index": "Feature"},
+            )
+            fig.update_layout(showlegend=False, height=430)
+            st.plotly_chart(fig, width="stretch")
 
     st.markdown("---")
-    st.markdown("##### 🔎 Why did efficiency drop or improve? (Local explanation)")
-    st.caption("Pick a record from the filtered dataset to see which features pushed the prediction toward its class.")
-
+    st.markdown("##### Example Current-State Record")
     sample_for_explain = fdf.sample(n=min(300, len(fdf)), random_state=7).reset_index()
     sample_for_explain["label"] = (
-        sample_for_explain["Datetime"].astype(str) + " | Machine " + sample_for_explain["Machine_ID"].astype(str)
-        + " | " + sample_for_explain["Efficiency_Status"]
+        sample_for_explain["Datetime"].astype(str)
+        + " | Machine "
+        + sample_for_explain["Machine_ID"].astype(str)
+        + " | "
+        + sample_for_explain["Efficiency_Status"]
     )
     choice = st.selectbox("Select a record", options=sample_for_explain["label"])
     row = sample_for_explain[sample_for_explain["label"] == choice].iloc[0]
 
-    row_enc = pd.get_dummies(pd.DataFrame([row]), columns=["Operation_Mode"], prefix="Mode")
-    for c in meta["mode_cols"]:
-        if c not in row_enc.columns:
-            row_enc[c] = 0
-    pred_label, proba_dict = predict_row("XGBoost", row_enc)
+    raw_row = pd.DataFrame([row]).drop(columns=["label"], errors="ignore")
+    encoded_row = encode_for_models(raw_row, mode_columns)
+    xgb_label, xgb_probabilities = predict_row("XGBoost", encoded_row)
+    rule_label, _ = predict_row("Transparent Business Rule", raw_row)
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Logged Efficiency Status", row["Efficiency_Status"])
-    m2.metric("Model Prediction", pred_label)
-    m3.metric("Confidence", f"{max(proba_dict.values()) * 100:.1f}%")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Logged status", str(row["Efficiency_Status"]))
+    m2.metric("Rule classification", rule_label)
+    m3.metric("XGBoost benchmark", xgb_label)
+    m4.metric(
+        "Max XGBoost class probability",
+        (
+            f"{max(xgb_probabilities.values()) * 100:.1f}%"
+            if xgb_probabilities
+            else "N/A"
+        ),
+    )
 
-    explain_cols = ["Error_Rate_%", "Production_Speed_units_per_hr", "Error_to_Output_Ratio",
-                     "Quality_Adjusted_Error", "Network_Reliability_Score", "Sensor_Stability_Score"]
-    st.markdown("**Key metric values for this record vs. dataset average:**")
-    comp = pd.DataFrame({
-        "Metric": explain_cols,
-        "This Record": [row[c] for c in explain_cols],
-        "Dataset Average": [df[c].mean() for c in explain_cols],
-    })
-    comp["This Record"] = comp["This Record"].round(2)
-    comp["Dataset Average"] = comp["Dataset Average"].round(2)
-    st.dataframe(comp, width='stretch', hide_index=True)
+    explain_cols = [
+        "Error_Rate_%",
+        "Production_Speed_units_per_hr",
+        "Error_to_Output_Ratio",
+        "Quality_Adjusted_Error",
+        "Network_Reliability_Score",
+        "Sensor_Stability_Score",
+    ]
+    comparison = pd.DataFrame(
+        {
+            "Metric": explain_cols,
+            "This Record": [row[column] for column in explain_cols],
+            "Dataset Average": [df[column].mean() for column in explain_cols],
+        }
+    )
+    comparison["This Record"] = comparison["This Record"].round(2)
+    comparison["Dataset Average"] = comparison["Dataset Average"].round(2)
+    st.dataframe(comparison, width="stretch", hide_index=True)
 
-    if row["Error_Rate_%"] > error_sensitivity:
-        st.error(f"⚠️ Error Rate ({row['Error_Rate_%']:.2f}%) exceeds your alert threshold of {error_sensitivity}% — a primary driver of reduced efficiency.")
-    if row["Production_Speed_units_per_hr"] < speed_sensitivity:
-        st.error(f"⚠️ Production Speed ({row['Production_Speed_units_per_hr']:.1f} units/hr) is below your alert threshold of {speed_sensitivity} units/hr — a primary driver of reduced efficiency.")
-    if row["Error_Rate_%"] <= error_sensitivity and row["Production_Speed_units_per_hr"] >= speed_sensitivity:
-        st.success("✅ Both key drivers (error rate, production speed) are within healthy sensitivity thresholds.")
+    error_rate = float(str(row["Error_Rate_%"]))
+    production_speed = float(str(row["Production_Speed_units_per_hr"]))
+
+    if error_rate > 5:
+        st.error("Rule condition triggered: Error Rate > 5%.")
+    elif production_speed < 200:
+        st.error("Rule condition triggered: Production Speed < 200 units/hr.")
+    elif error_rate <= 2 and production_speed >= 400:
+        st.success("High-rule conditions are satisfied.")
+    else:
+        st.info("The record falls into the Medium rule region.")
+
 
 # ==================================================================
-# TAB 4 — Operational Monitoring View
+# TAB 4 — Operational monitoring
 # ==================================================================
 with tab4:
     st.subheader("Operational Monitoring")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### Efficiency Status by Operation Mode")
-        ct = pd.crosstab(fdf["Operation_Mode"], fdf["Efficiency_Status"], normalize="index") * 100
-        for s in STATUS_ORDER:
-            if s not in ct.columns:
-                ct[s] = 0
-        ct = ct[STATUS_ORDER].reset_index().melt(id_vars="Operation_Mode", var_name="Efficiency_Status", value_name="Pct")
-        fig = px.bar(ct, x="Operation_Mode", y="Pct", color="Efficiency_Status", barmode="stack",
-                     color_discrete_map=STATUS_COLORS, title="Efficiency Mix by Operation Mode (%)")
-        st.plotly_chart(fig, width='stretch')
+        operation_mix = (
+            pd.crosstab(
+                fdf["Operation_Mode"],
+                fdf["Efficiency_Status"],
+                normalize="index",
+            )
+            * 100
+        )
+        for status in STATUS_ORDER:
+            if status not in operation_mix.columns:
+                operation_mix[status] = 0
+        operation_mix = (
+            operation_mix[STATUS_ORDER]
+            .reset_index()
+            .melt(
+                id_vars="Operation_Mode",
+                var_name="Efficiency_Status",
+                value_name="Pct",
+            )
+        )
+        fig = px.bar(
+            operation_mix,
+            x="Operation_Mode",
+            y="Pct",
+            color="Efficiency_Status",
+            barmode="stack",
+            color_discrete_map=STATUS_COLORS,
+            title="Efficiency Mix by Operation Mode (%)",
+        )
+        st.plotly_chart(fig, width="stretch")
 
     with col2:
-        st.markdown("##### Network vs. Sensor vs. Production Impact")
-        group_scores = {}
-        for grp, feats in FEATURE_GROUPS.items():
-            valid = [f for f in feats if f in shap_imp.index]
-            group_scores[grp] = shap_imp[valid].sum()
-        gdf = pd.DataFrame({"Group": list(group_scores.keys()), "Total |SHAP| Impact": list(group_scores.values())})
-        fig2 = px.pie(gdf, names="Group", values="Total |SHAP| Impact", hole=0.45,
-                      title="Relative Impact on Efficiency Classification",
-                      color_discrete_sequence=px.colors.qualitative.Set2)
-        st.plotly_chart(fig2, width='stretch')
-        st.caption("Production/quality signals (error rate, throughput) dominate the classification; "
-                   "raw network and sensor telemetry contribute comparatively little in this dataset — "
-                   "see Explainability Panel and the Research Paper for details.")
+        if shap_imp.empty:
+            st.info("Run explainability analysis to generate grouped SHAP impact.")
+        else:
+            group_scores = {}
+            for group, features in FEATURE_GROUPS.items():
+                valid_features = [feature for feature in features if feature in shap_imp.index]
+                group_scores[group] = float(shap_imp[valid_features].sum())
+            grouped = pd.DataFrame(
+                {
+                    "Group": list(group_scores.keys()),
+                    "Total |SHAP| Impact": list(group_scores.values()),
+                }
+            )
+            fig = px.pie(
+                grouped,
+                names="Group",
+                values="Total |SHAP| Impact",
+                hole=0.45,
+                title="Relative Benchmark-Model Impact",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+            st.plotly_chart(fig, width="stretch")
+            st.caption(
+                "Production/quality variables dominate because they encode the current target rule."
+            )
 
     st.markdown("---")
-    st.markdown("##### Network Reliability vs. Efficiency Status")
-    fig3 = px.box(fdf, x="Efficiency_Status", y="Network_Reliability_Score", color="Efficiency_Status",
-                  category_orders={"Efficiency_Status": STATUS_ORDER}, color_discrete_map=STATUS_COLORS,
-                  title="Network Reliability Score Distribution by Efficiency Class")
-    st.plotly_chart(fig3, width='stretch')
+    fig = px.box(
+        fdf,
+        x="Efficiency_Status",
+        y="Network_Reliability_Score",
+        color="Efficiency_Status",
+        category_orders={"Efficiency_Status": STATUS_ORDER},
+        color_discrete_map=STATUS_COLORS,
+        title="Network Reliability by Logged Efficiency Class",
+    )
+    st.plotly_chart(fig, width="stretch")
 
-    st.markdown("##### At-Risk Records (based on your sensitivity thresholds)")
-    at_risk = fdf[(fdf["Error_Rate_%"] > error_sensitivity) | (fdf["Production_Speed_units_per_hr"] < speed_sensitivity)]
-    st.metric("Records flagged at-risk", f"{len(at_risk):,} ({len(at_risk) / len(fdf) * 100:.1f}% of filtered data)")
+    st.markdown("##### Threshold-Flagged Current Records")
+    flagged = fdf[
+        (fdf["Error_Rate_%"] > error_sensitivity)
+        | (fdf["Production_Speed_units_per_hr"] < speed_sensitivity)
+    ]
+    st.metric(
+        "Records meeting selected thresholds",
+        f"{len(flagged):,} ({len(flagged) / len(fdf) * 100:.1f}% of filtered data)",
+    )
+    st.caption(
+        "These are current threshold flags, not predicted future failures."
+    )
     st.dataframe(
-        at_risk.sort_values("Datetime", ascending=False)[
-            ["Datetime", "Machine_ID", "Operation_Mode", "Error_Rate_%",
-             "Production_Speed_units_per_hr", "Efficiency_Status"]
+        flagged.sort_values("Datetime", ascending=False)[
+            [
+                "Datetime",
+                "Machine_ID",
+                "Operation_Mode",
+                "Error_Rate_%",
+                "Production_Speed_units_per_hr",
+                "Efficiency_Status",
+            ]
         ].head(20),
-        width='stretch'
+        width="stretch",
     )
 
     st.markdown("---")
-    st.subheader("Model Performance Summary")
-    perf_rows = []
-    for name, r in model_results.items():
-        perf_rows.append({
-            "Model": name, "Accuracy": r["accuracy"], "Macro F1": r["f1_macro"],
-            "Weighted F1": r["f1_weighted"], "CV Std (stability)": r["cv_accuracy_std"],
-        })
-    perf_df = pd.DataFrame(perf_rows).round(4)
-    st.dataframe(perf_df, width='stretch', hide_index=True)
+    st.subheader("Current-State Benchmark Summary")
+
+    baseline_rows = []
+    for name, result in baseline_results.items():
+        baseline_rows.append(
+            {
+                "Method": name,
+                "Accuracy": result.get("accuracy"),
+                "Balanced Accuracy": result.get("balanced_accuracy"),
+                "Macro F1": result.get("macro_f1"),
+                "Weighted F1": result.get("weighted_f1"),
+            }
+        )
+    st.markdown("##### Baselines")
+    st.dataframe(
+        pd.DataFrame(baseline_rows).round(4),
+        width="stretch",
+        hide_index=True,
+    )
+
+    model_rows = []
+    for name, result in ml_model_results.items():
+        model_rows.append(
+            {
+                "Model": name,
+                "Accuracy": result.get("accuracy"),
+                "Balanced Accuracy": result.get("balanced_accuracy"),
+                "Macro F1": result.get("macro_f1"),
+                "Weighted F1": result.get("weighted_f1"),
+                "Macro Avg Precision": result.get("average_precision_macro"),
+                "Calibration Error": result.get("expected_calibration_error"),
+            }
+        )
+    st.markdown("##### ML Benchmarks")
+    st.dataframe(
+        pd.DataFrame(model_rows).round(4),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "High RF/XGBoost scores measure reconstruction of the contemporaneous label rule; they do not establish future predictive power."
+    )
+
+
+# ==================================================================
+# TAB 5 — Validation & evaluator response
+# ==================================================================
+with tab5:
+    st.subheader("Model Validation & Dataset Diagnostics")
+    st.caption(
+        "This section directly addresses class imbalance, validation methodology, target construction, and temporal-signal limitations."
+    )
+
+    vc1, vc2, vc3, vc4 = st.columns(4)
+    vc1.metric("Total records", f"{len(df):,}")
+    vc2.metric("Low class", f"{(df['Efficiency_Status'] == 'Low').mean() * 100:.2f}%")
+    vc3.metric("Medium class", f"{(df['Efficiency_Status'] == 'Medium').mean() * 100:.2f}%")
+    vc4.metric("High class", f"{(df['Efficiency_Status'] == 'High').mean() * 100:.2f}%")
+
+    st.markdown("### 1. Baseline and Holdout Comparison")
+    if not final_comparison.empty:
+        preferred = [
+            "method",
+            "accuracy",
+            "balanced_accuracy",
+            "macro_f1",
+            "weighted_f1",
+        ]
+        available = [column for column in preferred if column in final_comparison.columns]
+        st.dataframe(
+            final_comparison[available].round(4),
+            width="stretch",
+            hide_index=True,
+        )
+
+        plot_frame = final_comparison[["method", "balanced_accuracy", "macro_f1"]].copy()
+        plot_frame = plot_frame.melt(
+            id_vars="method", var_name="Metric", value_name="Score"
+        )
+        fig = px.bar(
+            plot_frame,
+            x="method",
+            y="Score",
+            color="Metric",
+            barmode="group",
+            title="Balanced Accuracy and Macro F1",
+        )
+        fig.update_yaxes(range=[0, 1.05])
+        fig.update_xaxes(tickangle=-20)
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("Run `03_modeling.py` to generate the final comparison artifact.")
+
+    st.markdown("### 2. Target-Construction Diagnostic")
+    if target_diagnostics:
+        majority = target_diagnostics.get("majority_baseline", {})
+        rule = target_diagnostics.get("business_rule_holdout", {})
+        tc1, tc2, tc3 = st.columns(3)
+        tc1.metric("Majority Macro F1", f"{majority.get('macro_f1', float('nan')):.4f}")
+        tc2.metric("Rule Holdout Macro F1", f"{rule.get('macro_f1', float('nan')):.4f}")
+        tc3.metric(
+            "Rule disagreements (100k rows)",
+            f"{target_diagnostics.get('business_rule_disagreements', 0):,}",
+        )
+        st.warning(
+            "The transparent rule reproduces the holdout perfectly and disagrees with only two records in the full dataset. "
+            "Therefore, near-perfect ML performance primarily reflects target-rule reconstruction."
+        )
+    else:
+        st.info("Target diagnostic artifact is not available.")
+
+    st.markdown("### 3. Expanding-Window Temporal Validation")
+    if not temporal_summary.empty:
+        st.dataframe(temporal_summary.round(4), width="stretch", hide_index=True)
+        if {"model", "macro_f1_mean"}.issubset(temporal_summary.columns):
+            fig = px.bar(
+                temporal_summary,
+                x="model",
+                y="macro_f1_mean",
+                error_y=("macro_f1_std" if "macro_f1_std" in temporal_summary.columns else None),
+                title="Expanding-Window Macro F1",
+            )
+            fig.update_yaxes(range=[0, 1.05])
+            st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("Run `temporal_validation.py` to generate expanding-window results.")
+
+    st.markdown("### 4. Feature Ablation")
+    if not ablation_results.empty:
+        preferred = [
+            "experiment",
+            "feature_count",
+            "accuracy",
+            "balanced_accuracy",
+            "macro_f1",
+            "high_recall",
+        ]
+        available = [column for column in preferred if column in ablation_results.columns]
+        st.dataframe(
+            ablation_results[available].round(4),
+            width="stretch",
+            hide_index=True,
+        )
+        if {"experiment", "macro_f1"}.issubset(ablation_results.columns):
+            fig = px.bar(
+                ablation_results,
+                x="experiment",
+                y="macro_f1",
+                title="Macro F1 After Removing Rule-Linked Features",
+            )
+            fig.update_yaxes(range=[0, 1.05])
+            fig.update_xaxes(tickangle=-20)
+            st.plotly_chart(fig, width="stretch")
+        st.error(
+            "Removing all rule-linked features reduces Macro F1 to roughly chance-level performance, demonstrating that sensor/network features do not independently explain the current label in this dataset."
+        )
+    else:
+        st.info("Feature-ablation results are not available.")
+
+    st.markdown("### 5. Temporal-Signal Audit")
+    if temporal_diagnostics:
+        horizon_rows = temporal_diagnostics.get("horizons", [])
+        horizon_frame = pd.DataFrame(horizon_rows)
+        if not horizon_frame.empty:
+            columns = [
+                column
+                for column in [
+                    "horizon",
+                    "observed_same_status_rate",
+                    "expected_same_status_if_independent",
+                    "agreement_above_chance",
+                    "cohen_kappa",
+                    "mutual_information",
+                ]
+                if column in horizon_frame.columns
+            ]
+            st.dataframe(
+                horizon_frame[columns].round(6),
+                width="stretch",
+                hide_index=True,
+            )
+        st.warning(
+            "Cohen's kappa is approximately zero and observed status agreement is essentially equal to independent chance agreement. "
+            "The dataset therefore does not support a defensible future-risk prediction claim."
+        )
+    else:
+        st.info("Temporal-signal diagnostic artifact is not available.")
+
+    st.markdown("### Final Interpretation")
+    st.success(
+        "The project is positioned as a validated current-state manufacturing efficiency classification and analytics system: "
+        "descriptive monitoring + transparent business rule + ML benchmarking + explainability. "
+        "Future degradation forecasting is intentionally excluded because the available data does not contain meaningful temporal dependence."
+    )
+
 
 st.markdown("---")
-st.caption("Prototype dashboard built for the Thales Group Smart Manufacturing AI project · "
-            "Unified Mentor Program · For demonstration and evaluation purposes.")
+st.caption(
+    "Thales Smart Manufacturing analytics prototype · Current-state classification, validation, and operational monitoring · For demonstration and evaluation purposes."
+)

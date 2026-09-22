@@ -1,188 +1,85 @@
 {
-  "Logistic Regression": {
-    "accuracy": 0.8815,
-    "precision_macro": 0.7677833973497843,
-    "recall_macro": 0.9000873975275668,
-    "f1_macro": 0.8201190203551382,
-    "precision_weighted": 0.9070570931407012,
-    "recall_weighted": 0.8815,
-    "f1_weighted": 0.8886564219943782,
-    "roc_auc_macro_ovr": 0.9759529192582148,
-    "cv_accuracy_mean": 0.8826875000000001,
-    "cv_accuracy_std": 0.003596004727471863,
-    "classification_report": {
-      "High": {
-        "precision": 0.6826137689614936,
-        "recall": 0.9590163934426229,
-        "f1-score": 0.7975460122699386,
-        "support": 610.0
-      },
-      "Low": {
-        "precision": 0.980736423087859,
-        "recall": 0.8844797743445093,
-        "f1-score": 0.9301243806249369,
-        "support": 15599.0
-      },
-      "Medium": {
-        "precision": 0.64,
-        "recall": 0.8567660247955684,
-        "f1-score": 0.7326866681705392,
-        "support": 3791.0
-      },
-      "accuracy": 0.8815,
-      "macro avg": {
-        "precision": 0.7677833973497843,
-        "recall": 0.9000873975275668,
-        "f1-score": 0.8201190203551382,
-        "support": 20000.0
-      },
-      "weighted avg": {
-        "precision": 0.9070570931407012,
-        "recall": 0.8815,
-        "f1-score": 0.8886564219943782,
-        "support": 20000.0
-      }
-    },
-    "confusion_matrix": [
-      [
-        585,
-        0,
-        25
-      ],
-      [
-        0,
-        13797,
-        1802
-      ],
-      [
-        272,
-        271,
-        3248
-      ]
+  "methodology": {
+    "split": "Chronological 80/20 holdout",
+    "primary_metric": "Macro F1",
+    "imbalance_metrics": [
+      "Balanced Accuracy",
+      "Macro F1",
+      "Weighted F1",
+      "Per-class Precision",
+      "Per-class Recall",
+      "Average Precision"
+    ],
+    "probability_quality": [
+      "Log Loss",
+      "Multiclass Brier Score",
+      "Expected Calibration Error"
     ]
   },
-  "Random Forest": {
-    "accuracy": 1.0,
-    "precision_macro": 1.0,
-    "recall_macro": 1.0,
-    "f1_macro": 1.0,
-    "precision_weighted": 1.0,
-    "recall_weighted": 1.0,
-    "f1_weighted": 1.0,
-    "roc_auc_macro_ovr": 1.0,
-    "cv_accuracy_mean": 0.9998999999999999,
-    "cv_accuracy_std": 9.354143466934417e-05,
-    "classification_report": {
-      "High": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 610.0
-      },
-      "Low": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 15599.0
-      },
-      "Medium": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 3791.0
-      },
+  "baselines": {
+    "Majority Baseline": {
+      "accuracy": 0.77995,
+      "balanced_accuracy": 0.3333333333333333,
+      "macro_f1": 0.2921243106079759,
+      "weighted_f1": 0.6835270681760723,
+      "macro_precision": 0.25998333333333334,
+      "macro_recall": 0.3333333333333333
+    },
+    "Transparent Business Rule": {
       "accuracy": 1.0,
-      "macro avg": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 20000.0
-      },
-      "weighted avg": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 20000.0
-      }
-    },
-    "confusion_matrix": [
-      [
-        610,
-        0,
-        0
-      ],
-      [
-        0,
-        15599,
-        0
-      ],
-      [
-        0,
-        0,
-        3791
-      ]
-    ]
+      "balanced_accuracy": 1.0,
+      "macro_f1": 1.0,
+      "weighted_f1": 1.0,
+      "macro_precision": 1.0,
+      "macro_recall": 1.0
+    }
   },
-  "XGBoost": {
-    "accuracy": 0.99755,
-    "precision_macro": 0.9959218741903885,
-    "recall_macro": 0.9976956999146358,
-    "f1_macro": 0.9968043671931008,
-    "precision_weighted": 0.9975625694134492,
-    "recall_weighted": 0.99755,
-    "f1_weighted": 0.997553329053197,
-    "roc_auc_macro_ovr": 0.9999860093846014,
-    "cv_accuracy_mean": 0.9984875000000001,
-    "cv_accuracy_std": 0.0004153311931459102,
-    "classification_report": {
-      "High": {
-        "precision": 0.9983606557377049,
-        "recall": 0.9983606557377049,
-        "f1-score": 0.9983606557377049,
-        "support": 610.0
-      },
-      "Low": {
-        "precision": 0.9993578217313126,
-        "recall": 0.9976280530803256,
-        "f1-score": 0.9984921882519008,
-        "support": 15599.0
-      },
-      "Medium": {
-        "precision": 0.9900471451021478,
-        "recall": 0.997098390925877,
-        "f1-score": 0.9935602575896965,
-        "support": 3791.0
-      },
-      "accuracy": 0.99755,
-      "macro avg": {
-        "precision": 0.9959218741903885,
-        "recall": 0.9976956999146358,
-        "f1-score": 0.9968043671931008,
-        "support": 20000.0
-      },
-      "weighted avg": {
-        "precision": 0.9975625694134492,
-        "recall": 0.99755,
-        "f1-score": 0.997553329053197,
-        "support": 20000.0
-      }
+  "models": {
+    "Logistic Regression": {
+      "accuracy": 0.8815,
+      "balanced_accuracy": 0.9000873975275668,
+      "macro_f1": 0.8201190203551382,
+      "weighted_f1": 0.8886564219943782,
+      "macro_precision": 0.7677833973497843,
+      "macro_recall": 0.9000873975275668,
+      "roc_auc_macro_ovr": 0.9759529269594277,
+      "average_precision_macro": 0.9223139858097472,
+      "high_class_average_precision": 0.9379310458231492,
+      "log_loss": 0.2480475540627867,
+      "multiclass_brier_score": 0.16290389828992796,
+      "expected_calibration_error": 0.03089136740387877
     },
-    "confusion_matrix": [
-      [
-        609,
-        0,
-        1
-      ],
-      [
-        0,
-        15562,
-        37
-      ],
-      [
-        1,
-        10,
-        3780
-      ]
-    ]
+    "Random Forest": {
+      "accuracy": 1.0,
+      "balanced_accuracy": 1.0,
+      "macro_f1": 1.0,
+      "weighted_f1": 1.0,
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "roc_auc_macro_ovr": 1.0,
+      "average_precision_macro": 1.0,
+      "high_class_average_precision": 1.0,
+      "log_loss": 0.013481092248270557,
+      "multiclass_brier_score": 0.0016816339345166924,
+      "expected_calibration_error": 0.012993124137234132
+    },
+    "XGBoost": {
+      "accuracy": 0.99755,
+      "balanced_accuracy": 0.9975625826015709,
+      "macro_f1": 0.9968033026445903,
+      "weighted_f1": 0.9975528379189608,
+      "macro_precision": 0.9960504434771525,
+      "macro_recall": 0.9975625826015709,
+      "roc_auc_macro_ovr": 0.9999863447224483,
+      "average_precision_macro": 0.9999639256173894,
+      "high_class_average_precision": 0.9999919376367242,
+      "log_loss": 0.007266193615715071,
+      "multiclass_brier_score": 0.004082220698969374,
+      "expected_calibration_error": 0.001650236907601394
+    }
+  },
+  "selection": {
+    "primary_operational_method": "Transparent Business Rule",
+    "ml_benchmark_model": "Random Forest"
   }
 }

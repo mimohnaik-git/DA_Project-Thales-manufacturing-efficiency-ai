@@ -1,0 +1,3 @@
+Machine_ID,Datetime,Error_Rate_%,Production_Speed_units_per_hr,Efficiency_Status,Rule_Prediction
+9,2025-01-11 19:43:00,5.0,436.121,Low,Medium
+46,2025-01-23 17:04:00,5.0,402.746,Low,Medium
