@@ -160,6 +160,34 @@ class TestProjectSanity(unittest.TestCase):
             "Transparent Business Rule",
         )
 
+        self.assertNotIn(
+            "best_model",
+            meta,
+        )
+
+        self.assertNotIn(
+            "benchmark_model",
+            meta,
+        )
+
+        holdout_comparison = meta[
+            "holdout_comparison"
+        ]
+
+        self.assertEqual(
+            holdout_comparison[
+                "highest_macro_f1_model"
+            ],
+            "Random Forest",
+        )
+
+        self.assertIn(
+            "not model selection",
+            holdout_comparison[
+                "interpretation"
+            ],
+        )
+
         self.assertEqual(
             set(meta["class_names"]),
             {"High", "Low", "Medium"},

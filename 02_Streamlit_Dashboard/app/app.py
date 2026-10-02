@@ -266,7 +266,6 @@ mode_columns = meta["mode_columns"]
 # New rebuilt result contract.
 ml_model_results = model_results.get("models", {})
 baseline_results = model_results.get("baselines", {})
-model_selection = model_results.get("selection", {})
 methodology = model_results.get("methodology", {})
 
 # Validation artifacts are optional so the app remains deployable even if a

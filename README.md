@@ -209,11 +209,11 @@ The final benchmark uses a chronological **80% development / 20% holdout** split
 ### Final interpretation
 
 - **Transparent Business Rule** - primary operational classification method for this dataset
-- **Random Forest** - strongest ML benchmark by Macro F1
+- **Random Forest** - highest final-holdout Macro F1 among the three fixed ML benchmarks
 - **XGBoost** - near-perfect benchmark with strong probability-quality metrics
 - **Logistic Regression** - useful lower-complexity benchmark
 
-The ML models are retained as benchmark models, but their scores are not presented as proof of independent future predictive capability.
+The three ML models are treated as fixed benchmarks. The final holdout is used for descriptive evaluation, not to select a production model. Their scores are not presented as proof of independent future predictive capability.
 
 ---
 
