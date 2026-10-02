@@ -78,8 +78,9 @@
       "expected_calibration_error": 0.001650236907601394
     }
   },
-  "selection": {
+  "holdout_summary": {
     "primary_operational_method": "Transparent Business Rule",
-    "ml_benchmark_model": "Random Forest"
+    "highest_macro_f1_model": "Random Forest",
+    "interpretation": "Descriptive final-holdout comparison of fixed ML benchmarks; not model selection."
   }
 }

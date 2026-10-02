@@ -33,6 +33,7 @@ from config import (
 
 
 ROLLING_WINDOW = 5
+DEVELOPMENT_FRACTION = 0.80
 
 
 def rolling_cv(
@@ -193,19 +194,36 @@ def main() -> None:
     # --------------------------------------------------------------
     # Network reliability score
     # --------------------------------------------------------------
-    latency_min = df[
+    # Fit normalization bounds on the chronological development
+    # period only. This preserves final-holdout isolation while
+    # applying the learned bounds unchanged to every record.
+    chronological = (
+        df.sort_values("Datetime")
+        .reset_index(drop=True)
+    )
+
+    development_cutoff = int(
+        len(chronological)
+        * DEVELOPMENT_FRACTION
+    )
+
+    development = chronological.iloc[
+        :development_cutoff
+    ]
+
+    latency_min = development[
         "Network_Latency_ms"
     ].min()
 
-    latency_max = df[
+    latency_max = development[
         "Network_Latency_ms"
     ].max()
 
-    loss_min = df[
+    loss_min = development[
         "Packet_Loss_%"
     ].min()
 
-    loss_max = df[
+    loss_max = development[
         "Packet_Loss_%"
     ].max()
 
@@ -221,24 +239,28 @@ def main() -> None:
 
     latency_normalized = (
         (
-            df[
-                "Network_Latency_ms"
-            ]
-            - latency_min
-        )
-        / latency_range
+            (
+                df[
+                    "Network_Latency_ms"
+                ]
+                - latency_min
+            )
+            / latency_range
+        ).clip(0, 1)
         if latency_range != 0
         else 0
     )
 
     loss_normalized = (
         (
-            df[
-                "Packet_Loss_%"
-            ]
-            - loss_min
-        )
-        / loss_range
+            (
+                df[
+                    "Packet_Loss_%"
+                ]
+                - loss_min
+            )
+            / loss_range
+        ).clip(0, 1)
         if loss_range != 0
         else 0
     )

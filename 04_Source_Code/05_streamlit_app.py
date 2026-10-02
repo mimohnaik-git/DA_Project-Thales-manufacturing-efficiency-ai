@@ -1,6 +1,6 @@
 """
 Streamlit Web Application — Manufacturing Efficiency Classification & Validation
-Thales Group | Sensor, Production & 6G Network Data
+Portfolio Case Study | Sensor, Production & Network Telemetry
 ================================================================
 Run with: streamlit run app.py
 
@@ -35,7 +35,7 @@ import streamlit as st
 # Page config
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="Thales | Manufacturing Efficiency Analytics",
+    page_title="Manufacturing Efficiency Analytics | Portfolio Case Study",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -266,7 +266,6 @@ mode_columns = meta["mode_columns"]
 # New rebuilt result contract.
 ml_model_results = model_results.get("models", {})
 baseline_results = model_results.get("baselines", {})
-model_selection = model_results.get("selection", {})
 methodology = model_results.get("methodology", {})
 
 # Validation artifacts are optional so the app remains deployable even if a
@@ -286,7 +285,7 @@ temporal_diagnostics = load_optional_json(
 # ------------------------------------------------------------------
 # Sidebar — filters and classification method
 # ------------------------------------------------------------------
-st.sidebar.markdown("## ⚙️ Thales Smart Factory")
+st.sidebar.markdown("## ⚙️ Manufacturing Analytics")
 st.sidebar.caption("Manufacturing Efficiency Analytics")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔍 Filters")
@@ -371,7 +370,7 @@ st.sidebar.markdown(f"**Filtered records:** {len(fdf):,} / {len(df):,}")
 # Header
 # ------------------------------------------------------------------
 st.title("⚙️ Manufacturing Efficiency Classification & Validation")
-st.caption("Sensor, Production & 6G Network Data · Thales Group Smart Factory Initiative")
+st.caption("Sensor, production & network telemetry · Thales Group smart-manufacturing portfolio case study")
 
 st.info(
     "**Methodology note:** this dashboard performs current-state efficiency "

@@ -57,8 +57,10 @@
   "test_size": 20000,
   "primary_metric": "macro_f1",
   "primary_operational_method": "Transparent Business Rule",
-  "best_model": "Random Forest",
-  "benchmark_model": "Random Forest",
+  "holdout_comparison": {
+    "highest_macro_f1_model": "Random Forest",
+    "interpretation": "Descriptive final-holdout comparison of fixed ML benchmarks; not model selection."
+  },
   "rule_definition": {
     "low": "Error_Rate_% > 5 OR Production_Speed_units_per_hr < 200",
     "high": "Error_Rate_% <= 2 AND Production_Speed_units_per_hr >= 400",

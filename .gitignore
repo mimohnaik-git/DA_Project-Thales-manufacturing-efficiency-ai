@@ -1,12 +1,4 @@
-cat > .gitignore << 'EOF'
-venv/
-__pycache__/
-*.pyc
-.streamlit/
-.DS_Store
-EOF
-
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -52,10 +44,13 @@ build/
 dist/
 *.egg-info/
 
-# Streamlit secrets
+# Streamlit
 .streamlit/secrets.toml
 
 # Local caches
 .cache/
 .cache_*/
 huggingface/
+
+# Local agent/tool metadata
+.agents/

@@ -774,9 +774,9 @@ def main() -> None:
     )
 
     # --------------------------------------------------------------
-    # Benchmark model selection
+    # Final-holdout comparison summary
     # --------------------------------------------------------------
-    benchmark_model_name = max(
+    highest_holdout_model_name = max(
         model_results,
         key=lambda name: (
             model_results[name][
@@ -786,8 +786,9 @@ def main() -> None:
     )
 
     print(
-        "\nBest ML benchmark by Macro F1:",
-        benchmark_model_name,
+        "\nHighest final-holdout Macro F1 "
+        "among fixed ML benchmarks:",
+        highest_holdout_model_name,
     )
 
     print(
@@ -894,12 +895,15 @@ def main() -> None:
         "primary_operational_method": (
             "Transparent Business Rule"
         ),
-        "best_model": (
-            benchmark_model_name
-        ),
-        "benchmark_model": (
-            benchmark_model_name
-        ),
+        "holdout_comparison": {
+            "highest_macro_f1_model": (
+                highest_holdout_model_name
+            ),
+            "interpretation": (
+                "Descriptive final-holdout comparison "
+                "of fixed ML benchmarks; not model selection."
+            ),
+        },
         "rule_definition": {
             "low": (
                 "Error_Rate_% > 5 OR "
@@ -955,12 +959,16 @@ def main() -> None:
             ),
         },
         "models": model_results,
-        "selection": {
+        "holdout_summary": {
             "primary_operational_method": (
                 "Transparent Business Rule"
             ),
-            "ml_benchmark_model": (
-                benchmark_model_name
+            "highest_macro_f1_model": (
+                highest_holdout_model_name
+            ),
+            "interpretation": (
+                "Descriptive final-holdout comparison "
+                "of fixed ML benchmarks; not model selection."
             ),
         },
     }
