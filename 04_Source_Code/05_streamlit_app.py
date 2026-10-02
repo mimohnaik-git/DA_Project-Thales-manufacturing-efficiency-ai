@@ -481,7 +481,11 @@ with tab1:
             # The feature row contains both numeric values and the categorical
             # operation mode; keep the mapping value type broad enough for all
             # of the assignments below.
-            row: dict[str, object] = {column: 0 for column in feature_cols}
+            # The shared encoder creates the one-hot mode columns below. Keep
+            # them out of the input row to avoid duplicate columns after encoding.
+            row: dict[str, object] = {
+                column: 0 for column in feature_cols if column not in mode_columns
+            }
             row.update(
                 {
                     "Temperature_C": temp,
