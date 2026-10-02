@@ -357,6 +357,33 @@ class TestProjectSanity(unittest.TestCase):
             "Dashboard app and source copy have diverged.",
         )
 
+    def test_logistic_regression_what_if_classification(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(
+            str(DASHBOARD_DIR / "app" / "app.py"),
+            default_timeout=120,
+        ).run()
+
+        method = next(
+            widget
+            for widget in app.selectbox
+            if widget.label == "Current-state classification method"
+        )
+        method.select("Logistic Regression").run()
+
+        classify_button = next(
+            widget
+            for widget in app.button
+            if widget.label == "Classify Current Efficiency"
+        )
+        classify_button.click().run()
+
+        self.assertFalse(
+            app.exception,
+            "Logistic Regression what-if classification raised an app exception.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
